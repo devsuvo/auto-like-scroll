@@ -183,7 +183,7 @@
         const out = [];
         document.querySelectorAll(
           '[data-e2e="like-icon"],[data-e2e="browse-like-icon"],[data-e2e="browse-like"],[data-e2e="video-player-like"]'
-        ).forEach((el) => out.push(el.closest("button") || el));
+        ).forEach((el) => out.push(el.closest('button,[role="button"]') || el));
         if (!out.length) {
           document.querySelectorAll("button[aria-label]").forEach((b) => {
             const l = b.getAttribute("aria-label");
@@ -324,6 +324,10 @@
   function doLike(btn, useGap = true) {
     clicked.add(btn);
     if (S.liked(btn)) { log("already liked"); return; }
+    // কিছু site শুধু click() নয়, mouse event-ও দেখে; click একবারই হয়
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
+      btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    }
     btn.click();
     likes++;
     if (useGap) {
@@ -334,8 +338,28 @@
     log("liked");
   }
 
+  // ---- TikTok: স্ক্রিনে সবচেয়ে বেশি দেখা যাওয়া ভিডিওর item ----
+  function tiktokItem() {
+    let best = null, bestArea = 0;
+    document.querySelectorAll("video").forEach((v) => {
+      const r = v.getBoundingClientRect();
+      const h = Math.max(0, Math.min(r.bottom, vh()) - Math.max(r.top, 0));
+      const w = Math.max(0, Math.min(r.right, vw()) - Math.max(r.left, 0));
+      if (h * w > bestArea) { bestArea = h * w; best = v; }
+    });
+    if (!best) return null;
+    return best.closest('article,[data-e2e="recommend-list-item-container"]') || best;
+  }
+
+  // item-এর like বাটন: item-এর ভেতরে, না পেলে স্ক্রিনের মাঝের কাছেরটা
+  function tiktokLikeButton(item, buttons) {
+    const inside = buttons.filter((b) => item.contains(b));
+    const pool = inside.length ? inside : buttons;
+    return pool.slice().sort((a, b) => distToCenter(a) - distToCenter(b))[0] || null;
+  }
+
   // ---- TikTok: ভিডিও দেখা → like/skip → পরের ভিডিও ----
-  function tiktokStep(t) {
+  function tiktokStep(t, buttons) {
     if (!t) {
       // ভিডিও খুঁজে না পেলে কিছুক্ষণ পর scroll
       if (state.autoScroll && elapsed >= ttMax * 1000) { elapsed = 0; target = null; scrollNext(null); }
@@ -348,15 +372,29 @@
       if (elapsed < watchFor) return;
 
       // দেখা শেষ: সিদ্ধান্ত
+      if (!state.autoLike || clicked.has(t)) {
+        ttDecided = t;
+        ttScrollAt = elapsed + rand(500, 1500);
+        return;
+      }
+      const btn = tiktokLikeButton(t, buttons);
+      if (!btn) {
+        // বাটন এখনো load হয়নি: আরো ৩ সেকেন্ড চেষ্টা
+        if (elapsed < watchFor + 3000) { lastMsg = "like button খুঁজছে..."; return; }
+        log("like button পাওয়া যায়নি");
+        ttDecided = t;
+        ttScrollAt = elapsed;
+        return;
+      }
       ttDecided = t;
       ttScrollAt = elapsed + rand(500, 1500); // like-এর পর একটু থেমে scroll
-      if (!state.autoLike || t.tagName === "VIDEO" || clicked.has(t)) return;
-      const post = postOf(t);
+      clicked.add(t);
+      const post = t.tagName === "VIDEO" ? postOf(t) : t;
       const bad = blockedWord(post);
-      if (bad) { clicked.add(t); skipped++; log(`skip: "${bad}"`); }
-      else if (isPromoted(post)) { clicked.add(t); log("ad - skip"); }
-      else if (Math.random() > ttChance) { clicked.add(t); skipped++; log("skipped (random)"); }
-      else doLike(t, false);
+      if (bad) { skipped++; log(`skip: "${bad}"`); }
+      else if (isPromoted(post)) { log("ad - skip"); }
+      else if (Math.random() > ttChance) { skipped++; log("skipped (random)"); }
+      else doLike(btn, false);
       return;
     }
 
@@ -414,7 +452,7 @@
     renderBadge(buttons.length);
     if (now < cooldownUntil) return;
 
-    const t = pickTarget(buttons);
+    const t = SITE === "tiktok" ? tiktokItem() : pickTarget(buttons);
     if (t !== target) {
       target = t;
       elapsed = 0;
@@ -424,7 +462,7 @@
     }
     elapsed += dt;
 
-    if (SITE === "tiktok") { tiktokStep(t); return; }
+    if (SITE === "tiktok") { tiktokStep(t, buttons); return; }
 
     const waitLeft = lastLikeAt + nextGap - now;
     if (state.autoLike && waitLeft > 0) lastMsg = `next like ${Math.ceil(waitLeft / 1000)}s`;
