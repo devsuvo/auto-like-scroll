@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0 - auto-like-combined
+- Facebook, Instagram, X/Twitter যোগ
+- browser minimize বা অন্য tab-এ থাকলেও চলে (background ticker)
+- minimize অবস্থায় সরাসরি scroll (smooth animation চলে না বলে)
+- content.js গুছিয়ে নতুন করে লেখা, site অনুযায়ী আলাদা অংশ
+
 ## 1.5.1 - auto-like-combined
 - আরবি লেখা (৩+ অক্ষর) থাকলে পোস্ট বাদ
 

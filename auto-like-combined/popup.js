@@ -42,8 +42,8 @@ speedEl.addEventListener("change", () => {
 // বর্তমান tab-এ script না থাকলে (যেমন extension reload-এর পর) inject করে দেয়
 async function ensureInjected() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || !/^https:\/\/([^/]*\.)?(tiktok|linkedin)\.com\//.test(tab.url || "")) {
-    statusEl.textContent = "TikTok বা LinkedIn tab খুলে এখানে toggle করুন।";
+  if (!tab || !/^https:\/\/([^/]*\.)?(tiktok|linkedin|facebook|instagram|x|twitter)\.com\//.test(tab.url || "")) {
+    statusEl.textContent = "TikTok, LinkedIn, Facebook, Instagram বা X tab খুলে এখানে toggle করুন।";
     return;
   }
   try {
