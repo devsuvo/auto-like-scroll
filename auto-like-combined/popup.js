@@ -2,9 +2,16 @@ const autoLikeEl = document.getElementById("autoLike");
 const autoScrollEl = document.getElementById("autoScroll");
 const statusEl = document.getElementById("status");
 
-chrome.storage.local.get({ autoLike: false, autoScroll: false }, (v) => {
+const speedEl = document.getElementById("speed");
+
+chrome.storage.local.get({ autoLike: false, autoScroll: false, speed: "fast" }, (v) => {
   autoLikeEl.checked = !!v.autoLike;
   autoScrollEl.checked = !!v.autoScroll;
+  speedEl.value = v.speed;
+});
+
+speedEl.addEventListener("change", () => {
+  chrome.storage.local.set({ speed: speedEl.value });
 });
 
 // বর্তমান tab-এ script না থাকলে (যেমন extension reload-এর পর) inject করে দেয়

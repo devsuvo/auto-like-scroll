@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0 - auto-like-combined
+- অনেক দ্রুত: default Fast speed (like ~0.25s, scroll ~1s পরপর)
+- popup-এ Speed option (Fast / Normal / Slow)
+- LinkedIn: screen-এর সব পোস্ট একটার পর একটা like করে তারপর scroll
+
 ## 1.1.1 - auto-like-combined
 - LinkedIn নতুন design-এর like বাটন চেনা (role=button, "Reaction button state" label, aria-pressed ছাড়া)
 - LinkedIn-এ আগে like করা পোস্ট বাদ দেওয়া

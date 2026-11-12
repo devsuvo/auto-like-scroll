@@ -11,10 +11,14 @@
   if (!SITE) return;
 
   // ---- সেটিং ----
-  const WATCH_MIN = 4000;
-  const WATCH_MAX = 8000;
-  const LIKE_AFTER = 1500;
-  const TICK = 500;
+  // গতি: popup থেকে বদলানো যায়
+  const SPEEDS = {
+    fast:   { watch: [800, 1500],  likeAfter: 250,  cooldown: 600 },
+    normal: { watch: [2000, 4000], likeAfter: 700,  cooldown: 1000 },
+    slow:   { watch: [4000, 8000], likeAfter: 1500, cooldown: 1500 }
+  };
+  let cfg = SPEEDS.fast;
+  const TICK = 250;
   const LIKE_WORDS = /like|react|পছন্দ|লাইক/i;
   const NOT_LIKE_WORDS = /comment|share|repost|send|মন্তব্য|শেয়ার/i;
 
@@ -50,12 +54,14 @@
   }
 
   // ---- settings ----
-  chrome.storage.local.get({ autoLike: false, autoScroll: false }, (v) => {
+  chrome.storage.local.get({ autoLike: false, autoScroll: false, speed: "fast" }, (v) => {
     state.autoLike = !!v.autoLike;
     state.autoScroll = !!v.autoScroll;
+    cfg = SPEEDS[v.speed] || SPEEDS.fast;
   });
   chrome.storage.onChanged.addListener((c, area) => {
     if (area !== "local") return;
+    if (c.speed) cfg = SPEEDS[c.speed.newValue] || SPEEDS.fast;
     if (c.autoLike) state.autoLike = !!c.autoLike.newValue;
     if (c.autoScroll) state.autoScroll = !!c.autoScroll.newValue;
     target = null;
@@ -166,7 +172,7 @@
   }
 
   function scrollNext(anchor) {
-    cooldownUntil = Date.now() + 1500;
+    cooldownUntil = Date.now() + cfg.cooldown;
     const box = scrollerFor(anchor || document.querySelector("video") || document.body);
     const before = box.scrollTop;
     const amount = SITE === "tiktok" ? box.clientHeight : Math.round(innerHeight * 0.75);
@@ -184,7 +190,7 @@
       }
       window.scrollBy({ top: amount, behavior: "smooth" });
       log("scroll fallback");
-    }, 1000);
+    }, 700);
   }
 
   // ---- main loop ----
@@ -200,12 +206,14 @@
     if (t !== target) {
       target = t;
       elapsed = 0;
-      watchFor = rand(WATCH_MIN, WATCH_MAX);
+      watchFor = rand(cfg.watch[0], cfg.watch[1]);
     }
     elapsed += TICK;
 
-    if (state.autoLike && t && !clicked.has(t) && elapsed >= LIKE_AFTER) {
+    if (state.autoLike && t && !clicked.has(t) && elapsed >= cfg.likeAfter) {
       doLike(t);
+      // LinkedIn: screen-এ আরো পোস্ট থাকলে scroll-এর আগে সাথে সাথে পরেরটা like
+      if (SITE === "linkedin") target = null;
     }
     if (state.autoLike && !buttons.length && elapsed % 4000 < TICK) {
       log("like button পাওয়া যায়নি");
