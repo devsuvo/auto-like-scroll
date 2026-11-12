@@ -8,7 +8,7 @@ const SITE_NAMES = {
 const DEFAULTS = {
   autoLike: false, autoScroll: false, speed: "slow",
   gapMinMin: 1, gapMaxMin: 3, likeChance: 60,
-  ttWatchMin: 7, ttWatchMax: 8, ttLikeChance: 60,
+  ttWatchMin: 8, ttWatchMax: 8, ttLikeChance: 100,
   blockSensitive: true, blockWords: "",
   sites: { tiktok: true, linkedin: true, facebook: true, instagram: true, twitter: true },
   enabledTabs: []

@@ -54,3 +54,13 @@ function stop() {
   clearInterval(timer);
   timer = null;
 }
+
+// v2.3.0: TikTok-এ ৮ সেকেন্ড দেখে সব ভিডিওতে like - পুরনো সেটিং একবার বদলানো
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.get({ migrated_tt_230: false }, (v) => {
+    if (v.migrated_tt_230) return;
+    chrome.storage.local.set({
+      ttWatchMin: 8, ttWatchMax: 8, ttLikeChance: 100, migrated_tt_230: true
+    });
+  });
+});

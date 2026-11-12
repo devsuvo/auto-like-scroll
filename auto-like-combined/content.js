@@ -30,8 +30,8 @@
   let nextGap = 60000;
 
   // TikTok-এর আলাদা নিয়ম: প্রতিটা ভিডিও ৭–৮ সেকেন্ড দেখে তারপর like
-  let ttMin = 7, ttMax = 8;  // সেকেন্ড
-  let ttChance = 0.6;        // কত % ভিডিওতে like
+  let ttMin = 8, ttMax = 8;  // সেকেন্ড
+  let ttChance = 1;          // কত % ভিডিওতে like (100%)
   let ttDecided = null;      // যে ভিডিওর সিদ্ধান্ত হয়ে গেছে
   let ttScrollAt = 0;
 
@@ -88,7 +88,7 @@
     autoLike: false, autoScroll: false, speed: "slow",
     gapMinMin: 1, gapMaxMin: 3, likeChance: 60, lastLikeAt: 0,
     blockSensitive: true, blockWords: "",
-    ttWatchMin: 7, ttWatchMax: 8, ttLikeChance: 60,
+    ttWatchMin: 8, ttWatchMax: 8, ttLikeChance: 100,
     sites: { tiktok: true, linkedin: true, facebook: true, instagram: true, twitter: true },
     enabledTabs: []
   };
