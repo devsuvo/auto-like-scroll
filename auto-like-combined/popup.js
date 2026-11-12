@@ -10,6 +10,7 @@ const DEFAULTS = {
   gapMinMin: 1, gapMaxMin: 3, likeChance: 60,
   ttWatchMin: 8, ttWatchMax: 8, ttLikeChance: 100,
   liWaitMin: 30, liWaitMax: 50, liLikeChance: 100,
+  breakAfter: 15, breakMin: 5, reloadEvery: 10,
   blockSensitive: true, blockWords: "",
   sites: { tiktok: true, linkedin: true, facebook: true, instagram: true, twitter: true },
   enabledTabs: []
@@ -62,6 +63,9 @@ function render(v) {
   $("liWaitMin").value = v.liWaitMin;
   $("liWaitMax").value = v.liWaitMax;
   $("liLikeChance").value = v.liLikeChance;
+  $("breakAfter").value = v.breakAfter;
+  $("breakMin").value = v.breakMin;
+  $("reloadEvery").value = v.reloadEvery;
   $("blockSensitive").checked = v.blockSensitive !== false;
   $("blockWords").value = v.blockWords;
   document.querySelectorAll("[data-site]").forEach((el) => {
@@ -104,7 +108,8 @@ $("blockWords").addEventListener("change", () => chrome.storage.local.set({ bloc
 const NUM_FIELDS = {
   gapMinMin: [0, 60], gapMaxMin: [0, 60], likeChance: [0, 100],
   ttWatchMin: [1, 120], ttWatchMax: [1, 120], ttLikeChance: [0, 100],
-  liWaitMin: [1, 600], liWaitMax: [1, 600], liLikeChance: [0, 100]
+  liWaitMin: [1, 600], liWaitMax: [1, 600], liLikeChance: [0, 100],
+  breakAfter: [0, 1000], breakMin: [0, 600], reloadEvery: [0, 600]
 };
 for (const [id, [lo, hi]] of Object.entries(NUM_FIELDS)) {
   $(id).addEventListener("change", () => {

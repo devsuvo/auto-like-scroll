@@ -90,7 +90,20 @@
     if (v.liWaitMin != null) liMin = Math.max(1, Number(v.liWaitMin) || 30);
     if (v.liWaitMax != null) liMax = Math.max(1, Number(v.liWaitMax) || 50);
     if (v.liLikeChance != null) liChance = Math.min(100, Math.max(0, Number(v.liLikeChance))) / 100;
+    if (v.breakAfter != null) breakAfter = Math.max(0, Number(v.breakAfter) || 0);
+    if (v.breakMin != null) breakMin = Math.max(0, Number(v.breakMin) || 0);
+    if (v.reloadEvery != null) reloadEvery = Math.max(0, Number(v.reloadEvery) || 0);
+    if (v.batchLikes != null) batchLikes = Number(v.batchLikes) || 0;
+    if (v.breakUntil != null) breakUntil = Number(v.breakUntil) || 0;
   }
+
+  // ---- বিরতি ও reload ----
+  let breakAfter = 15;   // এতগুলো like হলে বিরতি (0 = বন্ধ)
+  let breakMin = 5;      // বিরতি কত মিনিট
+  let reloadEvery = 10;  // কত মিনিট পরপর page reload (0 = বন্ধ)
+  let batchLikes = 0;    // শেষ বিরতির পর কয়টা like (সব tab মিলিয়ে)
+  let breakUntil = 0;    // বিরতি কখন শেষ
+  const pageStartedAt = Date.now();
 
   const DEFAULTS = {
     autoLike: false, autoScroll: false, speed: "slow",
@@ -98,6 +111,7 @@
     blockSensitive: true, blockWords: "",
     ttWatchMin: 8, ttWatchMax: 8, ttLikeChance: 100,
     liWaitMin: 30, liWaitMax: 50, liLikeChance: 100,
+    breakAfter: 15, breakMin: 5, reloadEvery: 10, batchLikes: 0, breakUntil: 0,
     sites: { tiktok: true, linkedin: true, facebook: true, instagram: true, twitter: true },
     enabledTabs: []
   };
@@ -120,8 +134,12 @@
 
   chrome.storage.onChanged.addListener((c, area) => {
     if (area !== "local") return;
-    if (c.lastLikeAt && Object.keys(c).length === 1) {
-      lastLikeAt = c.lastLikeAt.newValue || 0; // অন্য tab like দিয়েছে
+    // শুধু হিসাবের মান বদলালে (অন্য tab like দিয়েছে) কাজ থামানো হয় না
+    const COUNTERS = ["lastLikeAt", "batchLikes", "breakUntil"];
+    if (Object.keys(c).every((k) => COUNTERS.includes(k))) {
+      if (c.lastLikeAt) lastLikeAt = c.lastLikeAt.newValue || 0;
+      if (c.batchLikes) batchLikes = c.batchLikes.newValue || 0;
+      if (c.breakUntil) breakUntil = c.breakUntil.newValue || 0;
       return;
     }
     loadAll();
@@ -345,6 +363,15 @@
       chrome.storage.local.set({ lastLikeAt });
     }
     log("liked");
+
+    // ১৫টা like হলে বিরতি
+    batchLikes++;
+    if (breakAfter > 0 && batchLikes >= breakAfter && breakMin > 0) {
+      breakUntil = Date.now() + breakMin * 60000;
+      batchLikes = 0;
+      log(`${breakAfter}টা like হয়েছে - ${breakMin} মিনিট বিরতি`);
+    }
+    chrome.storage.local.set({ batchLikes, breakUntil });
   }
 
   // ---- LinkedIn: পোস্ট মাঝখানে আনা → ৩০–৫০ সেকেন্ড অপেক্ষা → like → পরের পোস্ট ----
@@ -497,6 +524,22 @@
 
     const buttons = findLikeButtons();
     renderBadge(buttons.length);
+    // নির্দিষ্ট সময় পরপর page reload (reload-এর পর নিজে থেকে আবার চলবে)
+    if (reloadEvery > 0 && now - pageStartedAt >= reloadEvery * 60000) {
+      log("page reload...");
+      location.reload();
+      return;
+    }
+
+    // বিরতি চলছে
+    if (now < breakUntil) {
+      const s = Math.ceil((breakUntil - now) / 1000);
+      lastMsg = `বিরতি ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} বাকি`;
+      target = null;
+      elapsed = 0;
+      return;
+    }
+
     if (now < cooldownUntil) return;
 
     const t = SITE === "tiktok" ? tiktokItem() : pickTarget(buttons);

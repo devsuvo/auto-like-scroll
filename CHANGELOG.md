@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.6.0 - auto-like-combined
+- ১৫টা like হলে ৫ মিনিট বিরতি, তারপর নিজে থেকে আবার শুরু (সব tab মিলিয়ে হিসাব)
+- প্রতি ১০ মিনিটে page reload, reload-এর পর নিজে থেকে চলে
+- popup-এ "বিরতি ও reload" অংশ
+
 ## 2.5.0 - auto-like-combined
 - LinkedIn-এর আলাদা নিয়ম: পোস্ট মাঝখানে এনে ৩০–৫০ সেকেন্ড অপেক্ষা, তারপর like, তারপর পরের পোস্ট
 - popup-এ "LinkedIn-এর নিয়ম" অংশ (সেকেন্ড ও like %)
