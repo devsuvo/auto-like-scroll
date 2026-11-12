@@ -10,6 +10,14 @@ chrome.storage.local.get({ autoLike: false, autoScroll: false, speed: "fast" }, 
   speedEl.value = v.speed;
 });
 
+const gapEl = document.getElementById("likeGapMin");
+chrome.storage.local.get({ likeGapMin: 2 }, (v) => { gapEl.value = v.likeGapMin; });
+gapEl.addEventListener("change", () => {
+  const n = Math.max(0, parseFloat(gapEl.value) || 0);
+  gapEl.value = n;
+  chrome.storage.local.set({ likeGapMin: n });
+});
+
 speedEl.addEventListener("change", () => {
   chrome.storage.local.set({ speed: speedEl.value });
 });

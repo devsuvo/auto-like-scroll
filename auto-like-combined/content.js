@@ -18,6 +18,9 @@
     slow:   { watch: [4000, 8000], likeAfter: 1500, cooldown: 1500 }
   };
   let cfg = SPEEDS.fast;
+  let likeGapMs = 2 * 60 * 1000; // দুই like-এর মাঝে সময় (popup থেকে বদলানো যায়)
+  let lastLikeAt = 0;            // সব tab মিলিয়ে শেষ like-এর সময়
+  let nextGap = likeGapMs;
   const TICK = 250;
   const LIKE_WORDS = /like|react|পছন্দ|লাইক/i;
   const NOT_LIKE_WORDS = /comment|share|repost|send|মন্তব্য|শেয়ার/i;
@@ -54,13 +57,27 @@
   }
 
   // ---- settings ----
-  chrome.storage.local.get({ autoLike: false, autoScroll: false, speed: "fast" }, (v) => {
-    state.autoLike = !!v.autoLike;
-    state.autoScroll = !!v.autoScroll;
-    cfg = SPEEDS[v.speed] || SPEEDS.fast;
-  });
+  const setGap = (min) => {
+    likeGapMs = Math.max(0, Number(min) || 0) * 60 * 1000;
+    nextGap = jitter(likeGapMs);
+  };
+  // ±10% এলোমেলো, যাতে ঠিক একই সময় পরপর না হয়
+  function jitter(ms) { return ms * (0.9 + Math.random() * 0.2); }
+
+  chrome.storage.local.get(
+    { autoLike: false, autoScroll: false, speed: "fast", likeGapMin: 2, lastLikeAt: 0 },
+    (v) => {
+      state.autoLike = !!v.autoLike;
+      state.autoScroll = !!v.autoScroll;
+      cfg = SPEEDS[v.speed] || SPEEDS.fast;
+      setGap(v.likeGapMin);
+      lastLikeAt = v.lastLikeAt || 0;
+    }
+  );
   chrome.storage.onChanged.addListener((c, area) => {
     if (area !== "local") return;
+    if (c.likeGapMin) setGap(c.likeGapMin.newValue);
+    if (c.lastLikeAt) lastLikeAt = c.lastLikeAt.newValue || 0;
     if (c.speed) cfg = SPEEDS[c.speed.newValue] || SPEEDS.fast;
     if (c.autoLike) state.autoLike = !!c.autoLike.newValue;
     if (c.autoScroll) state.autoScroll = !!c.autoScroll.newValue;
@@ -157,6 +174,9 @@
     if (isLiked(btn)) { log("already liked"); return; }
     btn.click();
     likes++;
+    lastLikeAt = Date.now();
+    nextGap = jitter(likeGapMs);
+    chrome.storage.local.set({ lastLikeAt });
     log("liked");
   }
 
@@ -210,7 +230,11 @@
     }
     elapsed += TICK;
 
-    if (state.autoLike && t && !clicked.has(t) && elapsed >= cfg.likeAfter) {
+    const waitLeft = lastLikeAt + nextGap - Date.now();
+    if (state.autoLike && waitLeft > 0) {
+      lastMsg = `next like ${Math.ceil(waitLeft / 1000)}s`;
+    }
+    if (state.autoLike && waitLeft <= 0 && t && !clicked.has(t) && elapsed >= cfg.likeAfter) {
       doLike(t);
       // LinkedIn: screen-এ আরো পোস্ট থাকলে scroll-এর আগে সাথে সাথে পরেরটা like
       if (SITE === "linkedin") target = null;

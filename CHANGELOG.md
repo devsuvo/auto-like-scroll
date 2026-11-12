@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.0 - auto-like-combined
+- প্রতি ২ মিনিটে একটা like (default), popup থেকে মিনিট বদলানো যায়
+- সময় ±10% এলোমেলো; সব tab মিলিয়ে হিসাব
+- status box-এ পরের like কত সেকেন্ড পর তা দেখায়
+
 ## 1.2.0 - auto-like-combined
 - অনেক দ্রুত: default Fast speed (like ~0.25s, scroll ~1s পরপর)
 - popup-এ Speed option (Fast / Normal / Slow)
