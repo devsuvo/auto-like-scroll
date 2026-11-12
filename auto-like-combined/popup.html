@@ -87,6 +87,20 @@
     <input type="number" id="likeChance" min="0" max="100" step="5" style="width:50px">
   </div>
 
+  <div class="row">
+    <span>ধর্মীয় ও রাজনৈতিক পোস্ট বাদ</span>
+    <label class="switch">
+      <input type="checkbox" id="blockSensitive">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div style="padding-top:8px">
+    <span style="font-size:12px">আরো যেসব শব্দ থাকলে বাদ (কমা দিয়ে):</span>
+    <textarea id="blockWords" rows="2" placeholder="যেমন: crypto, betting"
+      style="width:100%;box-sizing:border-box;margin-top:4px;font:12px system-ui"></textarea>
+  </div>
+
   <p class="note" id="status">TikTok বা LinkedIn tab খোলা থাকলে সাথে সাথে কার্যকর হয়।</p>
 
   <script src="popup.js"></script>

@@ -71,8 +71,11 @@
 
   chrome.storage.local.get(
     { autoLike: false, autoScroll: false, speed: "fast",
-      gapMinMin: 1, gapMaxMin: 3, likeChance: 60, lastLikeAt: 0 },
+      gapMinMin: 1, gapMaxMin: 3, likeChance: 60, lastLikeAt: 0,
+      blockSensitive: true, blockWords: "" },
     (v) => {
+      blockOn = v.blockSensitive !== false;
+      buildBlock(v.blockWords);
       state.autoLike = !!v.autoLike;
       state.autoScroll = !!v.autoScroll;
       cfg = SPEEDS[v.speed] || SPEEDS.fast;
@@ -83,6 +86,12 @@
   );
   chrome.storage.onChanged.addListener((c, area) => {
     if (area !== "local") return;
+    if (c.blockSensitive || c.blockWords) {
+      chrome.storage.local.get({ blockSensitive: true, blockWords: "" }, (v) => {
+        blockOn = v.blockSensitive !== false;
+        buildBlock(v.blockWords);
+      });
+    }
     const nv = {};
     for (const k of ["gapMinMin", "gapMaxMin", "likeChance"]) if (c[k]) nv[k] = c[k].newValue;
     if (Object.keys(nv).length) { applySettings(nv); nextGap = randGap(); }
@@ -200,6 +209,48 @@
     return n;
   }
 
+  // ধর্মীয় ও রাজনৈতিক পোস্ট বাদ দেওয়ার শব্দ
+  const DEFAULT_BLOCK = [
+    // ধর্ম (English)
+    "islam", "islamic", "muslim", "allah", "quran", "koran", "hadith", "prophet",
+    "ramadan", "ramzan", "eid", "jummah", "jumma", "mosque", "masjid", "namaz", "salah",
+    "dua", "inshallah", "alhamdulillah", "subhanallah", "mashallah", "sunnah", "halal",
+    "haram", "iftar", "hijab", "hindu", "hinduism", "puja", "temple", "church",
+    "christian", "jesus", "bible", "buddha", "religion", "religious", "god", "spiritual",
+    // ধর্ম (বাংলা)
+    "ইসলাম", "মুসলিম", "মুসলমান", "আল্লাহ", "কোরআন", "কুরআন", "হাদিস", "নবী", "রাসূল",
+    "রাসুল", "রমজান", "ঈদ", "নামাজ", "মসজিদ", "দোয়া", "দোআ", "জুমা", "ইনশাআল্লাহ",
+    "আলহামদুলিল্লাহ", "সুবহানাল্লাহ", "মাশাআল্লাহ", "হিন্দু", "পূজা", "মন্দির", "ধর্ম",
+    "গির্জা", "খ্রিস্টান", "বৌদ্ধ", "সুন্নাহ", "হালাল", "হারাম",
+    // রাজনীতি (English)
+    "politics", "political", "election", "elections", "vote", "voting", "government",
+    "minister", "parliament", "awami", "bnp", "jamaat", "protest", "modi", "trump",
+    "biden", "israel", "palestine", "gaza", "prime minister", "president", "democracy",
+    // রাজনীতি (বাংলা)
+    "রাজনীতি", "রাজনৈতিক", "নির্বাচন", "ভোট", "সরকার", "মন্ত্রী", "সংসদ", "আওয়ামী",
+    "বিএনপি", "জামায়াত", "জামাত", "আন্দোলন", "প্রধানমন্ত্রী", "রাষ্ট্রপতি", "হাসিনা",
+    "ইউনূস", "গাজা", "ফিলিস্তিন", "ইসরায়েল"
+  ];
+  let blockOn = true;
+  let blockRegex = null;
+
+  function buildBlock(customText) {
+    const custom = String(customText || "").split(/[,\n]/).map((w) => w.trim()).filter(Boolean);
+    const words = (blockOn ? DEFAULT_BLOCK : []).concat(custom);
+    if (!words.length) { blockRegex = null; return; }
+    const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // ইংরেজি শব্দ পুরো শব্দ হিসেবে মিলবে (software-এ "war" না), বাংলা সরাসরি
+    const parts = words.map((w) => /^[\x00-\x7F]+$/.test(w) ? `\\b${esc(w)}\\b` : esc(w));
+    blockRegex = new RegExp(parts.join("|"), "i");
+  }
+  buildBlock("");
+
+  function blockedWord(post) {
+    if (!blockRegex) return null;
+    const m = (post.innerText || "").match(blockRegex);
+    return m ? m[0] : null;
+  }
+
   // বিজ্ঞাপন পোস্ট
   function isPromoted(post) {
     const head = (post.innerText || "").slice(0, 400);
@@ -275,7 +326,13 @@
     if (state.autoLike && waitLeft <= 0 && t && t.tagName !== "VIDEO" && !clicked.has(t)) {
       const post = postOf(t);
       const need = Math.max(cfg.likeAfter, readTime(post));
-      if (isPromoted(post)) {
+      const bad = blockedWord(post);
+      if (bad) {
+        clicked.add(t);
+        skipped++;
+        log(`skip: "${bad}"`);
+        if (SITE === "linkedin") target = null;
+      } else if (isPromoted(post)) {
         clicked.add(t);
         log("ad - skip");
         if (SITE === "linkedin") target = null;

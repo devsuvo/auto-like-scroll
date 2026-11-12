@@ -22,6 +22,19 @@ for (const [key, [def, lo, hi]] of Object.entries(NUM_FIELDS)) {
   });
 }
 
+const blockEl = document.getElementById("blockSensitive");
+const wordsEl = document.getElementById("blockWords");
+chrome.storage.local.get({ blockSensitive: true, blockWords: "" }, (v) => {
+  blockEl.checked = v.blockSensitive !== false;
+  wordsEl.value = v.blockWords;
+});
+blockEl.addEventListener("change", () => {
+  chrome.storage.local.set({ blockSensitive: blockEl.checked });
+});
+wordsEl.addEventListener("change", () => {
+  chrome.storage.local.set({ blockWords: wordsEl.value });
+});
+
 speedEl.addEventListener("change", () => {
   chrome.storage.local.set({ speed: speedEl.value });
 });
