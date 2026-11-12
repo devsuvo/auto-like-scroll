@@ -210,6 +210,60 @@
     for (const tag of tags) {
       for (const w of blockWordsLong) if (tag.includes(w)) return tag;
     }
+
+    // profile-এর নাম ও username
+    return blockedAuthor(post);
+  }
+
+  // ---- profile নাম / username ----
+  const AUTHOR_SELECTORS = {
+    tiktok: '[data-e2e="video-author-uniqueid"],[data-e2e="video-author-nickname"],' +
+            '[data-e2e="browse-username"],[data-e2e="browser-nickname"],a[href^="/@"]',
+    linkedin: '.update-components-actor__title,.update-components-actor__name,' +
+              '.update-components-actor__description,a[href*="/in/"],a[href*="/company/"]',
+    facebook: 'h2 a,h3 a,h4 a,strong a,a[role="link"] strong',
+    instagram: 'header a,header span',
+    twitter: '[data-testid="User-Name"]'
+  };
+
+  function authorInfo(post) {
+    const parts = [];
+    const add = (el) => {
+      parts.push(el.textContent || "");
+      const href = el.getAttribute && el.getAttribute("href");
+      if (href) {
+        // /@user, /in/user, /company/name, /user থেকে username
+        const m = href.match(/\/@([^/?#]+)|\/in\/([^/?#]+)|\/company\/([^/?#]+)/);
+        if (m) parts.push(m[1] || m[2] || m[3]);
+      }
+    };
+    post.querySelectorAll(AUTHOR_SELECTORS[SITE]).forEach(add);
+
+    // TikTok নতুন design-এ নাম ভিডিওর বাইরে থাকতে পারে: screen-এর মাঝের কাছেরটা
+    if (!parts.join("").trim() && SITE === "tiktok") {
+      const els = Array.from(document.querySelectorAll(AUTHOR_SELECTORS.tiktok)).filter(inViewport);
+      els.sort((a, b) => distToCenter(a) - distToCenter(b));
+      els.slice(0, 2).forEach(add);
+    }
+    return parts.join(" ").trim();
+  }
+
+  function blockedAuthor(post) {
+    const name = authorInfo(post);
+    if (!name) return null;
+
+    // আরবি নাম
+    if (blockOn && ((name.match(ARABIC) || []).length >= 3 || ARABIC_SIGN.test(name))) {
+      return "profile: আরবি নাম";
+    }
+    // _ . - কে ফাঁকা ধরে সাধারণ মিল ("islamic_reminder" → "islamic reminder")
+    const spaced = name.replace(/[_.\-]+/g, " ");
+    const m = blockRegex && spaced.match(blockRegex);
+    if (m) return `profile: ${m[0]}`;
+
+    // জোড়া লাগানো নাম ("QuranDaily", "masjidvibes")
+    const compact = name.toLowerCase().replace(/[\s_.\-]+/g, "");
+    for (const w of blockWordsLong) if (compact.includes(w)) return `profile: ${w}`;
     return null;
   }
 

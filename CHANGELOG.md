@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.7.0 - auto-like-combined
+- profile নাম ও username-ও পরীক্ষা করে (islamic_reminder, QuranDaily, আরবি নাম)
+- সব site-এর জন্য নাম খোঁজার নিয়ম; TikTok-এ ভিডিওর বাইরের নামও
+
 ## 2.6.1 - auto-like-combined
 - জোড়া লাগানো hashtag-এর ভেতরেও খোঁজে (#islamicreminder, #masjidvibes)
 - TikTok-এ প্রচলিত ইসলামিক শব্দ যোগ (waz, ওয়াজ, তিলাওয়াত, nasheed, umrah, makkah, আজান ইত্যাদি)
