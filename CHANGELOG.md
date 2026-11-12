@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.0 - auto-like-combined
+- TikTok-এর আলাদা নিয়ম: প্রতিটা ভিডিও ৭–৮ সেকেন্ড দেখে তারপর like, তারপর পরের ভিডিও
+- TikTok-এ আলাদা like %; অন্য site-এর ১–৩ মিনিট বিরতির ওপর প্রভাব ফেলে না
+- popup-এ "TikTok-এর নিয়ম" অংশ
+
 ## 2.1.0 - auto-like-combined
 - শুধু চালু করা tab-এ চলে (অন্য tab/window-এ না)
 - site অনুযায়ী on/off (TikTok, LinkedIn, Facebook, Instagram, X)

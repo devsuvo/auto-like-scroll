@@ -29,6 +29,12 @@
   let lastLikeAt = 0;         // সব tab মিলিয়ে শেষ like-এর সময়
   let nextGap = 60000;
 
+  // TikTok-এর আলাদা নিয়ম: প্রতিটা ভিডিও ৭–৮ সেকেন্ড দেখে তারপর like
+  let ttMin = 7, ttMax = 8;  // সেকেন্ড
+  let ttChance = 0.6;        // কত % ভিডিওতে like
+  let ttDecided = null;      // যে ভিডিওর সিদ্ধান্ত হয়ে গেছে
+  let ttScrollAt = 0;
+
   // autoLike/autoScroll: কী করবে; siteOn: এই site চালু কিনা; tabOn: এই tab চালু কিনা
   const state = { autoLike: false, autoScroll: false, siteOn: true, tabOn: false };
   let myTabId = null;
@@ -73,12 +79,16 @@
     if (v.gapMinMin != null) gapMin = Math.max(0, Number(v.gapMinMin) || 0);
     if (v.gapMaxMin != null) gapMax = Math.max(0, Number(v.gapMaxMin) || 0);
     if (v.likeChance != null) likeChance = Math.min(100, Math.max(0, Number(v.likeChance))) / 100;
+    if (v.ttWatchMin != null) ttMin = Math.max(1, Number(v.ttWatchMin) || 7);
+    if (v.ttWatchMax != null) ttMax = Math.max(1, Number(v.ttWatchMax) || 8);
+    if (v.ttLikeChance != null) ttChance = Math.min(100, Math.max(0, Number(v.ttLikeChance))) / 100;
   }
 
   const DEFAULTS = {
     autoLike: false, autoScroll: false, speed: "slow",
     gapMinMin: 1, gapMaxMin: 3, likeChance: 60, lastLikeAt: 0,
     blockSensitive: true, blockWords: "",
+    ttWatchMin: 7, ttWatchMax: 8, ttLikeChance: 60,
     sites: { tiktok: true, linkedin: true, facebook: true, instagram: true, twitter: true },
     enabledTabs: []
   };
@@ -310,15 +320,51 @@
     return readTimes.get(post);
   }
 
-  function doLike(btn) {
+  // useGap=false হলে (TikTok) অন্য site-এর ১–৩ মিনিট বিরতির হিসাবে ধরা হয় না
+  function doLike(btn, useGap = true) {
     clicked.add(btn);
     if (S.liked(btn)) { log("already liked"); return; }
     btn.click();
     likes++;
-    lastLikeAt = Date.now();
-    nextGap = randGap();
-    chrome.storage.local.set({ lastLikeAt });
+    if (useGap) {
+      lastLikeAt = Date.now();
+      nextGap = randGap();
+      chrome.storage.local.set({ lastLikeAt });
+    }
     log("liked");
+  }
+
+  // ---- TikTok: ভিডিও দেখা → like/skip → পরের ভিডিও ----
+  function tiktokStep(t) {
+    if (!t) {
+      // ভিডিও খুঁজে না পেলে কিছুক্ষণ পর scroll
+      if (state.autoScroll && elapsed >= ttMax * 1000) { elapsed = 0; target = null; scrollNext(null); }
+      return;
+    }
+
+    if (ttDecided !== t) {
+      const left = Math.ceil((watchFor - elapsed) / 1000);
+      lastMsg = `watching ${Math.max(0, left)}s`;
+      if (elapsed < watchFor) return;
+
+      // দেখা শেষ: সিদ্ধান্ত
+      ttDecided = t;
+      ttScrollAt = elapsed + rand(500, 1500); // like-এর পর একটু থেমে scroll
+      if (!state.autoLike || t.tagName === "VIDEO" || clicked.has(t)) return;
+      const post = postOf(t);
+      const bad = blockedWord(post);
+      if (bad) { clicked.add(t); skipped++; log(`skip: "${bad}"`); }
+      else if (isPromoted(post)) { clicked.add(t); log("ad - skip"); }
+      else if (Math.random() > ttChance) { clicked.add(t); skipped++; log("skipped (random)"); }
+      else doLike(t, false);
+      return;
+    }
+
+    if (state.autoScroll && elapsed >= ttScrollAt) {
+      target = null;
+      elapsed = 0;
+      scrollNext(t);
+    }
   }
 
   function scrollerFor(el) {
@@ -372,9 +418,13 @@
     if (t !== target) {
       target = t;
       elapsed = 0;
-      watchFor = rand(cfg.watch[0], cfg.watch[1]);
+      watchFor = SITE === "tiktok"
+        ? rand(Math.min(ttMin, ttMax), Math.max(ttMin, ttMax)) * 1000
+        : rand(cfg.watch[0], cfg.watch[1]);
     }
     elapsed += dt;
+
+    if (SITE === "tiktok") { tiktokStep(t); return; }
 
     const waitLeft = lastLikeAt + nextGap - now;
     if (state.autoLike && waitLeft > 0) lastMsg = `next like ${Math.ceil(waitLeft / 1000)}s`;

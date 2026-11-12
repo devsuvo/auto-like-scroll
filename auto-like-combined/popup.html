@@ -122,10 +122,29 @@
     </div>
   </div>
 
+  <!-- TikTok-এর আলাদা নিয়ম -->
+  <div class="card">
+    <details>
+      <summary>TikTok-এর নিয়ম</summary>
+      <div class="row">
+        <span>প্রতিটা ভিডিও দেখবে <small>সেকেন্ড (কম – বেশি), তারপর like</small></span>
+        <span>
+          <input type="number" id="ttWatchMin" min="1" step="1"> –
+          <input type="number" id="ttWatchMax" min="1" step="1">
+        </span>
+      </div>
+      <div class="row">
+        <span>কত % ভিডিওতে like</span>
+        <input type="number" id="ttLikeChance" min="0" max="100" step="5">
+      </div>
+      <p class="note">TikTok-এ নিচের ১–৩ মিনিট বিরতি লাগে না, প্রতিটা ভিডিও দেখা শেষে সিদ্ধান্ত নেয়।</p>
+    </details>
+  </div>
+
   <!-- নিরাপত্তা -->
   <div class="card">
     <details>
-      <summary>Like-এর নিয়ম</summary>
+      <summary>Like-এর নিয়ম (LinkedIn, Facebook, Instagram, X)</summary>
       <div class="row">
         <span>Like বিরতি <small>মিনিট (কম – বেশি)</small></span>
         <span>
