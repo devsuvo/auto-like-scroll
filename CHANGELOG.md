@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.6.1 - auto-like-combined
+- জোড়া লাগানো hashtag-এর ভেতরেও খোঁজে (#islamicreminder, #masjidvibes)
+- TikTok-এ প্রচলিত ইসলামিক শব্দ যোগ (waz, ওয়াজ, তিলাওয়াত, nasheed, umrah, makkah, আজান ইত্যাদি)
+
 ## 2.6.0 - auto-like-combined
 - ১৫টা like হলে ৫ মিনিট বিরতি, তারপর নিজে থেকে আবার শুরু (সব tab মিলিয়ে হিসাব)
 - প্রতি ১০ মিনিটে page reload, reload-এর পর নিজে থেকে চলে

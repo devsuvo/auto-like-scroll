@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Like & Scroll (TikTok, LinkedIn, Facebook, Instagram, X)",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "description": "TikTok, LinkedIn, Facebook, Instagram ও X-এ auto like ও auto scroll - minimize অবস্থাতেও চলে।",
   "permissions": ["storage", "scripting", "tabs"],
   "host_permissions": [

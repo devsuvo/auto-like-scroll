@@ -154,6 +154,13 @@
     "dua", "inshallah", "alhamdulillah", "subhanallah", "mashallah", "sunnah", "halal",
     "haram", "iftar", "hijab", "hindu", "hinduism", "puja", "temple", "church",
     "christian", "jesus", "bible", "buddha", "religion", "religious", "god", "spiritual",
+    // TikTok-এ প্রচলিত ইসলামিক শব্দ/hashtag
+    "mosques", "deen", "ummah", "nasheed", "naat", "waz", "tilawat", "tilawah", "azan", "adhan",
+    "umrah", "hajj", "makkah", "mecca", "madina", "madinah", "medina", "kaaba", "imam", "sheikh",
+    "dawah", "jannah", "akhirah", "astaghfirullah", "bismillah", "assalamualaikum", "sahaba",
+    "islamictiktok", "muslimtiktok", "islamicvideo", "islamicreminder", "quranrecitation",
+    "ওয়াজ", "তিলাওয়াত", "গজল", "নাশিদ", "হুজুর", "আজান", "উমরাহ", "হজ", "মক্কা", "মদিনা",
+    "কাবা", "ইমাম", "জান্নাত", "বিসমিল্লাহ", "আসসালামু", "সুবহানআল্লাহ", "আস্তাগফিরুল্লাহ",
     // ধর্ম (বাংলা)
     "ইসলাম", "মুসলিম", "মুসলমান", "আল্লাহ", "কোরআন", "কুরআন", "হাদিস", "নবী", "রাসূল",
     "রাসুল", "রমজান", "ঈদ", "নামাজ", "মসজিদ", "দোয়া", "দোআ", "জুমা", "ইনশাআল্লাহ",
@@ -179,7 +186,12 @@
     // ইংরেজি শব্দ পুরো শব্দ হিসেবে মিলবে, বাংলা সরাসরি
     const parts = words.map((w) => /^[\x00-\x7F]+$/.test(w) ? `\\b${esc(w)}\\b` : esc(w));
     blockRegex = new RegExp(parts.join("|"), "i");
+    // hashtag-এর ভেতরে খোঁজার জন্য: ৫+ অক্ষরের ইংরেজি শব্দ (ছোট শব্দে ভুল মিল এড়াতে)
+    blockWordsLong = words
+      .map((w) => w.toLowerCase().replace(/\s+/g, ""))
+      .filter((w) => /^[\x00-\x7F]+$/.test(w) && w.length >= 5);
   }
+  let blockWordsLong = [];
 
   // আরবি অক্ষর
   const ARABIC = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-ﻼ]/g;
@@ -191,7 +203,14 @@
     if (blockOn && ARABIC_SIGN.test(text)) return "আরবি চিহ্ন";
     if (!blockRegex) return null;
     const m = text.match(blockRegex);
-    return m ? m[0] : null;
+    if (m) return m[0];
+
+    // জোড়া লাগানো hashtag: #islamicreminder-এর ভেতরে "islamic"
+    const tags = text.toLowerCase().match(/#[\p{L}\p{N}_]+/gu) || [];
+    for (const tag of tags) {
+      for (const w of blockWordsLong) if (tag.includes(w)) return tag;
+    }
+    return null;
   }
 
   function isPromoted(post) {
