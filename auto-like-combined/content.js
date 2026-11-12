@@ -1,295 +1,268 @@
-// Auto Like & Scroll - TikTok, LinkedIn, Facebook, Instagram, X/Twitter (v2.0.0)
-// - like বাটন খুঁজে কাজ করে (container selector-এর ওপর কম নির্ভর)
-// - background থেকে "tick" আসে, তাই browser minimize/অন্য tab-এও চলে
+// Auto Like & Scroll - content script (v3.0.0)
+// TikTok, LinkedIn, Facebook, Instagram, X/Twitter
+// - প্রতিটা site-এর আলাদা নিয়ম: অপেক্ষা, like %, ঘণ্টা/দিনের সীমা (config.js)
+// - ধর্মীয়/রাজনৈতিক/আরবি filter (filter.js)
+// - সতর্কবার্তা ("Try again later", "Action blocked", captcha…) দেখলে নিজে থেকে বন্ধ
+// - background থেকে "tick" আসে, তাই minimize/অন্য tab-এও চলে
 (() => {
   if (window.__autoLikeLoaded) return; // দুইবার inject হলে বাদ
   window.__autoLikeLoaded = true;
 
-  const host = location.hostname;
-  const SITE =
-    host.includes("tiktok.com") ? "tiktok" :
-    host.includes("linkedin.com") ? "linkedin" :
-    host.includes("facebook.com") ? "facebook" :
-    host.includes("instagram.com") ? "instagram" :
-    (host.includes("x.com") || host.includes("twitter.com")) ? "twitter" : null;
+  const CFG = globalThis.AutoLikeConfig;
+  const FILTER = globalThis.AutoLikeFilter;
+  if (!CFG || !FILTER) {
+    console.warn("[AutoLike] config.js/filter.js লোড হয়নি");
+    return;
+  }
+
+  const SITE = CFG.siteFromHost(location.hostname);
   if (!SITE) return;
+  const FEED = SITE !== "tiktok"; // TikTok-এ একবারে একটা ভিডিও, বাকিগুলো feed
+  const KEYS = CFG.RULE_KEYS[SITE];
 
-  // TikTok-এ একবারে একটা ভিডিও; বাকিগুলো feed (screen-এ কয়েকটা পোস্ট)
-  const FEED = SITE !== "tiktok";
+  const SECOND = 1000, MINUTE = 60 * SECOND, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
 
-  // ---- সেটিং ----
+  // Scroll গতি: পোস্ট খুঁজতে কত দ্রুত নামবে, scroll-এর পর কতক্ষণ থামবে
   const SPEEDS = {
-    fast:   { watch: [800, 1500],  likeAfter: 250,  cooldown: 600 },
-    normal: { watch: [2000, 4000], likeAfter: 700,  cooldown: 1000 },
-    slow:   { watch: [4000, 8000], likeAfter: 1500, cooldown: 1500 }
+    fast:   { cooldown: 600,  search: 800 },
+    normal: { cooldown: 1000, search: 1500 },
+    slow:   { cooldown: 1500, search: 2500 }
   };
-  let cfg = SPEEDS.fast;
-  let gapMin = 1, gapMax = 3; // দুই like-এর মাঝে ১–৩ মিনিট এলোমেলো
-  let likeChance = 0.6;       // ৬০% পোস্টে like
-  let lastLikeAt = 0;         // সব tab মিলিয়ে শেষ like-এর সময়
-  let nextGap = 60000;
 
-  // TikTok-এর আলাদা নিয়ম: প্রতিটা ভিডিও ৭–৮ সেকেন্ড দেখে তারপর like
-  let ttMin = 8, ttMax = 8;  // সেকেন্ড
-  let ttChance = 1;          // কত % ভিডিওতে like (100%)
-  let ttDecided = null;      // যে ভিডিওর সিদ্ধান্ত হয়ে গেছে
-  let ttScrollAt = 0;
+  // ---- সেটিং (storage থেকে) ----
+  const state = {
+    autoLike: false, autoScroll: false, siteOn: true, tabOn: false,
+    humanize: true, stopOnWarning: true
+  };
+  let speed = SPEEDS.slow;
+  let rule = { min: 30, max: 50, chance: 1, hourly: 0, daily: 0 };
+  let matcher = null;
+  let breakAfter = 15, breakMin = 5, reloadEvery = 10;
 
-  // LinkedIn-এর আলাদা নিয়ম: পোস্ট মাঝখানে এনে ৩০–৫০ সেকেন্ড অপেক্ষা, তারপর like
-  let liMin = 30, liMax = 50; // সেকেন্ড
-  let liChance = 1;           // কত % পোস্টে like
-  const centered = new WeakSet(); // যে পোস্ট মাঝখানে আনা হয়ে গেছে
+  // ---- হিসাব (সব tab মিলিয়ে, storage-এ থাকে) ----
+  let batchLikes = 0, breakUntil = 0;
+  let likeLog = {};          // { site: [like-এর সময়…] } শেষ ২৪ ঘণ্টা
+  let siteBlockedUntil = {}; // { site: সময় } সতর্কবার্তার পর বন্ধ
 
-  // autoLike/autoScroll: কী করবে; siteOn: এই site চালু কিনা; tabOn: এই tab চালু কিনা
-  const state = { autoLike: false, autoScroll: false, siteOn: true, tabOn: false };
+  // ---- এই page-এর অবস্থা ----
   let myTabId = null;
-  const clicked = new WeakSet();
-  let target = null;
-  let elapsed = 0;
-  let watchFor = 0;
-  let cooldownUntil = 0;
+  const clicked = new WeakSet();  // যে পোস্ট/ভিডিওর সিদ্ধান্ত হয়ে গেছে
+  const centered = new WeakSet(); // যে পোস্ট মাঝখানে আনা হয়েছে
+  let target = null, elapsed = 0, watchFor = 0;
+  let cooldownUntil = 0, idleUntil = 0;
+  let ttDecided = null, ttScrollAt = 0;
   let likes = 0, skipped = 0, scrolls = 0;
   let lastMsg = "ready";
-  let lastTickAt = 0;
+  let lastTickAt = 0, lastWarnCheck = 0;
   let viewH = innerHeight, viewW = innerWidth; // minimize হলে শেষ জানা মাপ
+  const pageStartedAt = Date.now();
 
   const rand = (a, b) => a + Math.random() * (b - a);
+  const num = (v, d) => (v != null && Number.isFinite(Number(v)) ? Number(v) : d);
   const log = (m) => { lastMsg = m; console.log("[AutoLike]", m); };
-  const isOn = () =>
-    (state.autoLike || state.autoScroll) && state.siteOn && state.tabOn;
+  const isOn = () => (state.autoLike || state.autoScroll) && state.siteOn && state.tabOn;
 
-  // ---- status box ----
+  function fmt(ms) {
+    const s = Math.max(0, Math.ceil(ms / 1000));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = String(s % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${r}` : `${m}:${r}`;
+  }
+
+  // =====================================================================
+  // status box
+  // =====================================================================
   const badge = document.createElement("div");
   badge.style.cssText =
     "position:fixed;left:10px;bottom:10px;z-index:2147483647;" +
     "background:rgba(0,0,0,.8);color:#fff;font:12px/1.4 system-ui,sans-serif;" +
-    "padding:6px 10px;border-radius:8px;pointer-events:none;display:none;max-width:280px";
+    "padding:6px 10px;border-radius:8px;pointer-events:none;display:none;max-width:300px";
 
   function renderBadge(btnCount) {
     if (document.hidden) return;
     if (document.body && !badge.isConnected) document.body.appendChild(badge);
     badge.style.display = isOn() ? "block" : "none";
     if (!isOn()) return;
+    const limits = rule.hourly || rule.daily
+      ? ` | ঘণ্টায় ${recentLikes(HOUR).length}/${rule.hourly || "∞"} দিনে ${recentLikes(DAY).length}/${rule.daily || "∞"}`
+      : "";
     badge.textContent =
       `AutoLike [${SITE}] Like:${state.autoLike ? "ON" : "off"} Scroll:${state.autoScroll ? "ON" : "off"}` +
-      ` | buttons:${btnCount} likes:${likes} skip:${skipped} scrolls:${scrolls} | ${lastMsg}`;
+      ` | buttons:${btnCount} likes:${likes} skip:${skipped} scrolls:${scrolls}${limits} | ${lastMsg}`;
   }
 
-  // ---- settings ----
-  function randGap() {
-    const lo = Math.min(gapMin, gapMax), hi = Math.max(gapMin, gapMax);
-    return (lo + Math.random() * (hi - lo)) * 60000;
-  }
-  function applySettings(v) {
-    if (v.gapMinMin != null) gapMin = Math.max(0, Number(v.gapMinMin) || 0);
-    if (v.gapMaxMin != null) gapMax = Math.max(0, Number(v.gapMaxMin) || 0);
-    if (v.likeChance != null) likeChance = Math.min(100, Math.max(0, Number(v.likeChance))) / 100;
-    if (v.ttWatchMin != null) ttMin = Math.max(1, Number(v.ttWatchMin) || 7);
-    if (v.ttWatchMax != null) ttMax = Math.max(1, Number(v.ttWatchMax) || 8);
-    if (v.ttLikeChance != null) ttChance = Math.min(100, Math.max(0, Number(v.ttLikeChance))) / 100;
-    if (v.liWaitMin != null) liMin = Math.max(1, Number(v.liWaitMin) || 30);
-    if (v.liWaitMax != null) liMax = Math.max(1, Number(v.liWaitMax) || 50);
-    if (v.liLikeChance != null) liChance = Math.min(100, Math.max(0, Number(v.liLikeChance))) / 100;
-    if (v.breakAfter != null) breakAfter = Math.max(0, Number(v.breakAfter) || 0);
-    if (v.breakMin != null) breakMin = Math.max(0, Number(v.breakMin) || 0);
-    if (v.reloadEvery != null) reloadEvery = Math.max(0, Number(v.reloadEvery) || 0);
-    if (v.batchLikes != null) batchLikes = Number(v.batchLikes) || 0;
-    if (v.breakUntil != null) breakUntil = Number(v.breakUntil) || 0;
-  }
-
-  // ---- বিরতি ও reload ----
-  let breakAfter = 15;   // এতগুলো like হলে বিরতি (0 = বন্ধ)
-  let breakMin = 5;      // বিরতি কত মিনিট
-  let reloadEvery = 10;  // কত মিনিট পরপর page reload (0 = বন্ধ)
-  let batchLikes = 0;    // শেষ বিরতির পর কয়টা like (সব tab মিলিয়ে)
-  let breakUntil = 0;    // বিরতি কখন শেষ
-  const pageStartedAt = Date.now();
-
-  const DEFAULTS = {
-    autoLike: false, autoScroll: false, speed: "slow",
-    gapMinMin: 1, gapMaxMin: 3, likeChance: 60, lastLikeAt: 0,
-    blockSensitive: true, blockWords: "",
-    ttWatchMin: 8, ttWatchMax: 8, ttLikeChance: 100,
-    liWaitMin: 30, liWaitMax: 50, liLikeChance: 100,
-    breakAfter: 15, breakMin: 5, reloadEvery: 10, batchLikes: 0, breakUntil: 0,
-    sites: { tiktok: true, linkedin: true, facebook: true, instagram: true, twitter: true },
-    enabledTabs: []
-  };
-
+  // =====================================================================
+  // settings
+  // =====================================================================
   function loadAll() {
-    chrome.storage.local.get(DEFAULTS, (v) => {
+    chrome.storage.local.get(CFG.DEFAULTS, (v) => {
       state.autoLike = !!v.autoLike;
       state.autoScroll = !!v.autoScroll;
       state.siteOn = (v.sites || {})[SITE] !== false;
       state.tabOn = myTabId != null && (v.enabledTabs || []).includes(myTabId);
-      cfg = SPEEDS[v.speed] || SPEEDS.slow;
-      applySettings(v);
-      nextGap = randGap();
-      lastLikeAt = v.lastLikeAt || 0;
-      blockOn = v.blockSensitive !== false;
-      buildBlock(v.blockWords);
+      state.humanize = v.humanize !== false;
+      state.stopOnWarning = v.stopOnWarning !== false;
+      speed = SPEEDS[v.speed] || SPEEDS.slow;
+
+      const d = CFG.RULE_DEFAULTS;
+      rule = {
+        min: Math.max(1, num(v[KEYS.min], d[KEYS.min])),
+        max: Math.max(1, num(v[KEYS.max], d[KEYS.max])),
+        chance: Math.min(100, Math.max(0, num(v[KEYS.chance], d[KEYS.chance]))) / 100,
+        hourly: Math.max(0, num(v[KEYS.hourly], d[KEYS.hourly])),
+        daily: Math.max(0, num(v[KEYS.daily], d[KEYS.daily]))
+      };
+      if (rule.min > rule.max) [rule.min, rule.max] = [rule.max, rule.min];
+
+      breakAfter = Math.max(0, num(v.breakAfter, 15));
+      breakMin = Math.max(0, num(v.breakMin, 5));
+      reloadEvery = Math.max(0, num(v.reloadEvery, 10));
+      batchLikes = num(v.batchLikes, 0);
+      breakUntil = num(v.breakUntil, 0);
+      likeLog = v.likeLog || {};
+      siteBlockedUntil = v.siteBlockedUntil || {};
+      matcher = FILTER.compile({ sensitive: v.blockSensitive !== false, custom: v.blockWords });
       syncTicker();
     });
   }
 
   chrome.storage.onChanged.addListener((c, area) => {
     if (area !== "local") return;
-    // শুধু হিসাবের মান বদলালে (অন্য tab like দিয়েছে) কাজ থামানো হয় না
-    const COUNTERS = ["lastLikeAt", "batchLikes", "breakUntil"];
-    if (Object.keys(c).every((k) => COUNTERS.includes(k))) {
-      if (c.lastLikeAt) lastLikeAt = c.lastLikeAt.newValue || 0;
-      if (c.batchLikes) batchLikes = c.batchLikes.newValue || 0;
-      if (c.breakUntil) breakUntil = c.breakUntil.newValue || 0;
+    // শুধু হিসাব বদলালে (অন্য tab like দিয়েছে) কাজ থামানো হয় না
+    if (Object.keys(c).every((k) => CFG.COUNTER_KEYS.includes(k))) {
+      if (c.batchLikes) batchLikes = num(c.batchLikes.newValue, 0);
+      if (c.breakUntil) breakUntil = num(c.breakUntil.newValue, 0);
+      if (c.likeLog) likeLog = c.likeLog.newValue || {};
+      if (c.siteBlockedUntil) siteBlockedUntil = c.siteBlockedUntil.newValue || {};
       return;
     }
     loadAll();
     target = null;
   });
 
-  // ---- ধর্মীয় / রাজনৈতিক filter ----
-  const DEFAULT_BLOCK = [
-    // ধর্ম (English)
-    "islam", "islamic", "muslim", "allah", "quran", "koran", "hadith", "prophet",
-    "ramadan", "ramzan", "eid", "jummah", "jumma", "mosque", "masjid", "namaz", "salah",
-    "dua", "inshallah", "alhamdulillah", "subhanallah", "mashallah", "sunnah", "halal",
-    "haram", "iftar", "hijab", "hindu", "hinduism", "puja", "temple", "church",
-    "christian", "jesus", "bible", "buddha", "religion", "religious", "god", "spiritual",
-    // TikTok-এ প্রচলিত ইসলামিক শব্দ/hashtag
-    "mosques", "deen", "ummah", "nasheed", "naat", "waz", "tilawat", "tilawah", "azan", "adhan",
-    "umrah", "hajj", "makkah", "mecca", "madina", "madinah", "medina", "kaaba", "imam", "sheikh",
-    "dawah", "jannah", "akhirah", "astaghfirullah", "bismillah", "assalamualaikum", "sahaba",
-    "islamictiktok", "muslimtiktok", "islamicvideo", "islamicreminder", "quranrecitation",
-    "ওয়াজ", "তিলাওয়াত", "গজল", "নাশিদ", "হুজুর", "আজান", "উমরাহ", "হজ", "মক্কা", "মদিনা",
-    "কাবা", "ইমাম", "জান্নাত", "বিসমিল্লাহ", "আসসালামু", "সুবহানআল্লাহ", "আস্তাগফিরুল্লাহ",
-    // ধর্ম (বাংলা)
-    "ইসলাম", "মুসলিম", "মুসলমান", "আল্লাহ", "কোরআন", "কুরআন", "হাদিস", "নবী", "রাসূল",
-    "রাসুল", "রমজান", "ঈদ", "নামাজ", "মসজিদ", "দোয়া", "দোআ", "জুমা", "ইনশাআল্লাহ",
-    "আলহামদুলিল্লাহ", "সুবহানাল্লাহ", "মাশাআল্লাহ", "হিন্দু", "পূজা", "মন্দির", "ধর্ম",
-    "গির্জা", "খ্রিস্টান", "বৌদ্ধ", "সুন্নাহ", "হালাল", "হারাম",
-    // রাজনীতি (English)
-    "politics", "political", "election", "elections", "vote", "voting", "government",
-    "minister", "parliament", "awami", "bnp", "jamaat", "protest", "modi", "trump",
-    "biden", "israel", "palestine", "gaza", "prime minister", "president", "democracy",
-    // রাজনীতি (বাংলা)
-    "রাজনীতি", "রাজনৈতিক", "নির্বাচন", "ভোট", "সরকার", "মন্ত্রী", "সংসদ", "আওয়ামী",
-    "বিএনপি", "জামায়াত", "জামাত", "আন্দোলন", "প্রধানমন্ত্রী", "রাষ্ট্রপতি", "হাসিনা",
-    "ইউনূস", "গাজা", "ফিলিস্তিন", "ইসরায়েল"
-  ];
-  let blockOn = true;
-  let blockRegex = null;
-
-  function buildBlock(customText) {
-    const custom = String(customText || "").split(/[,\n]/).map((w) => w.trim()).filter(Boolean);
-    const words = (blockOn ? DEFAULT_BLOCK : []).concat(custom);
-    if (!words.length) { blockRegex = null; return; }
-    const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // ইংরেজি শব্দ পুরো শব্দ হিসেবে মিলবে, বাংলা সরাসরি
-    const parts = words.map((w) => /^[\x00-\x7F]+$/.test(w) ? `\\b${esc(w)}\\b` : esc(w));
-    blockRegex = new RegExp(parts.join("|"), "i");
-    // hashtag-এর ভেতরে খোঁজার জন্য: ৫+ অক্ষরের ইংরেজি শব্দ (ছোট শব্দে ভুল মিল এড়াতে)
-    blockWordsLong = words
-      .map((w) => w.toLowerCase().replace(/\s+/g, ""))
-      .filter((w) => /^[\x00-\x7F]+$/.test(w) && w.length >= 5);
+  // =====================================================================
+  // like-এর সীমা (ঘণ্টা / ২৪ ঘণ্টা) ও বিরতি
+  // =====================================================================
+  function recentLikes(win, now = Date.now()) {
+    return (likeLog[SITE] || []).filter((t) => now - t < win).sort((a, b) => a - b);
   }
-  let blockWordsLong = [];
 
-  // আরবি অক্ষর
-  const ARABIC = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-ﻼ]/g;
-  const ARABIC_SIGN = /[ﷰ-﷽]/; // ﷺ ﷲ ﷻ
-  const ARABIC_ONE = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-ﻼ]/; // একটা হলেই
+  // সীমা পূর্ণ হলে { why, until } ফেরত দেয়
+  function limitHit(now) {
+    if (rule.daily > 0) {
+      const d = recentLikes(DAY, now);
+      if (d.length >= rule.daily) return { why: "আজকের like সীমা পূর্ণ", until: d[d.length - rule.daily] + DAY };
+    }
+    if (rule.hourly > 0) {
+      const h = recentLikes(HOUR, now);
+      if (h.length >= rule.hourly) return { why: "ঘণ্টার like সীমা পূর্ণ", until: h[h.length - rule.hourly] + HOUR };
+    }
+    return null;
+  }
 
-  // ---- caption ----
+  function recordLike(now) {
+    likeLog = { ...likeLog, [SITE]: recentLikes(DAY, now).concat(now) };
+    batchLikes++;
+    if (breakAfter > 0 && breakMin > 0 && batchLikes >= breakAfter) {
+      breakUntil = now + breakMin * MINUTE;
+      batchLikes = 0;
+      log(`${breakAfter}টা like হয়েছে - ${breakMin} মিনিট বিরতি`);
+    }
+    chrome.storage.local.set({ likeLog, batchLikes, breakUntil });
+  }
+
+  // =====================================================================
+  // সতর্কবার্তা: প্ল্যাটফর্ম আটকাতে শুরু করলে থেমে যাওয়া
+  // =====================================================================
+  const WARN_RE = new RegExp([
+    "try again later", "action blocked", "we restrict certain activity",
+    "temporarily (?:blocked|restricted|limited)", "you(?:'|’)re temporarily blocked",
+    "can(?:'|’)t use this feature", "misusing this feature", "going too fast",
+    "too many requests", "rate limit", "unusual activity", "suspicious activity",
+    "automated behavior", "confirm (?:it(?:'|’)s|that it(?:'|’)s) you",
+    "verify (?:it(?:'|’)s|that it(?:'|’)s) you", "are you a robot", "not a robot",
+    "unable to like", "over the daily limit", "reached (?:the|your) (?:[\\w-]+ ){0,3}limit",
+    "সাময়িকভাবে ব্লক", "পরে আবার চেষ্টা করুন", "অস্বাভাবিক কার্যকলাপ", "খুব দ্রুত", "সীমা অতিক্রম"
+  ].join("|"), "i");
+  const WARN_SEL = '[role="dialog"],[role="alertdialog"],[role="alert"],[data-testid="toast"],[aria-live="assertive"]';
+  const CAPTCHA_SEL = '#captcha-verify-container,[id*="captcha" i],[class*="captcha" i],' +
+                      'iframe[src*="captcha"],iframe[src*="challenge"]';
+
+  function detectWarning(now) {
+    if (now - lastWarnCheck < 2000) return null;
+    lastWarnCheck = now;
+    for (const el of document.querySelectorAll(WARN_SEL)) {
+      if (badge.contains(el) || !el.getClientRects().length) continue; // লুকানো বাদ
+      const m = (el.innerText || "").slice(0, 800).match(WARN_RE);
+      if (m) return m[0];
+    }
+    for (const el of document.querySelectorAll(CAPTCHA_SEL)) {
+      const r = el.getBoundingClientRect(); // ছোট badge (যেমন reCAPTCHA লোগো) বাদ
+      if (r.width >= 200 && r.height >= 150 && inViewport(el)) return "captcha";
+    }
+    return null;
+  }
+
+  // =====================================================================
+  // filter (filter.js): caption, পোস্টের লেখা, profile নাম
+  // =====================================================================
   const CAPTION_SELECTORS = {
     tiktok: '[data-e2e="video-desc"],[data-e2e="browse-video-desc"],[data-e2e="video-caption"],' +
             '[data-e2e="new-desc-span"],[data-e2e="search-card-desc"]',
-    linkedin: '.update-components-text,.feed-shared-update-v2__description,.feed-shared-text',
+    linkedin: ".update-components-text,.feed-shared-update-v2__description,.feed-shared-text",
     facebook: '[data-ad-preview="message"],[data-ad-comet-preview="message"]',
     instagram: "h1,ul li span",
     twitter: '[data-testid="tweetText"]'
   };
-
-  function captionText(post) {
-    const sel = CAPTION_SELECTORS[SITE];
-    let els = Array.from(post.querySelectorAll(sel));
-    // TikTok নতুন design-এ caption ভিডিওর বাইরে: screen-এর মাঝের কাছেরটা
-    if (!els.length && SITE === "tiktok") {
-      els = Array.from(document.querySelectorAll(sel)).filter(inViewport);
-      els.sort((a, b) => distToCenter(a) - distToCenter(b));
-      els = els.slice(0, 1);
-    }
-    return els.map((e) => e.innerText || e.textContent || "").join(" ");
-  }
-
-  function blockedWord(post) {
-    const caption = captionText(post);
-    const text = (post.innerText || "") + " " + caption;
-    // caption-এ একটা আরবি অক্ষর থাকলেও বাদ
-    if (blockOn && ARABIC_ONE.test(caption)) return "caption-এ আরবি";
-    if (blockOn && (text.match(ARABIC) || []).length >= 1) return "আরবি লেখা";
-    if (blockOn && ARABIC_SIGN.test(text)) return "আরবি চিহ্ন";
-    if (!blockRegex) return null;
-    const m = text.match(blockRegex);
-    if (m) return m[0];
-
-    // জোড়া লাগানো hashtag: #islamicreminder-এর ভেতরে "islamic"
-    const tags = text.toLowerCase().match(/#[\p{L}\p{N}_]+/gu) || [];
-    for (const tag of tags) {
-      for (const w of blockWordsLong) if (tag.includes(w)) return tag;
-    }
-
-    // profile-এর নাম ও username
-    return blockedAuthor(post);
-  }
-
-  // ---- profile নাম / username ----
   const AUTHOR_SELECTORS = {
     tiktok: '[data-e2e="video-author-uniqueid"],[data-e2e="video-author-nickname"],' +
             '[data-e2e="browse-username"],[data-e2e="browser-nickname"],a[href^="/@"]',
-    linkedin: '.update-components-actor__title,.update-components-actor__name,' +
+    linkedin: ".update-components-actor__title,.update-components-actor__name," +
               '.update-components-actor__description,a[href*="/in/"],a[href*="/company/"]',
     facebook: 'h2 a,h3 a,h4 a,strong a,a[role="link"] strong',
-    instagram: 'header a,header span',
+    instagram: "header a,header span",
     twitter: '[data-testid="User-Name"]'
   };
 
-  function authorInfo(post) {
+  // TikTok নতুন design-এ caption/নাম ভিডিওর বাইরে থাকে: তখন screen-এর মাঝের কাছেরটা
+  function findIn(post, sel, fallbackCount) {
+    let els = Array.from(post.querySelectorAll(sel));
+    if (!els.length && SITE === "tiktok") {
+      els = Array.from(document.querySelectorAll(sel)).filter(inViewport);
+      els.sort((a, b) => distToCenter(a) - distToCenter(b));
+      els = els.slice(0, fallbackCount);
+    }
+    return els;
+  }
+
+  function authorName(els) {
     const parts = [];
-    const add = (el) => {
+    for (const el of els) {
       parts.push(el.textContent || "");
       const href = el.getAttribute && el.getAttribute("href");
-      if (href) {
-        // /@user, /in/user, /company/name, /user থেকে username
-        const m = href.match(/\/@([^/?#]+)|\/in\/([^/?#]+)|\/company\/([^/?#]+)/);
-        if (m) parts.push(m[1] || m[2] || m[3]);
-      }
-    };
-    post.querySelectorAll(AUTHOR_SELECTORS[SITE]).forEach(add);
-
-    // TikTok নতুন design-এ নাম ভিডিওর বাইরে থাকতে পারে: screen-এর মাঝের কাছেরটা
-    if (!parts.join("").trim() && SITE === "tiktok") {
-      const els = Array.from(document.querySelectorAll(AUTHOR_SELECTORS.tiktok)).filter(inViewport);
-      els.sort((a, b) => distToCenter(a) - distToCenter(b));
-      els.slice(0, 2).forEach(add);
+      const m = href && href.match(/\/@([^/?#]+)|\/in\/([^/?#]+)|\/company\/([^/?#]+)/);
+      if (m) parts.push(m[1] || m[2] || m[3]); // username
     }
     return parts.join(" ").trim();
   }
 
-  function blockedAuthor(post) {
-    const name = authorInfo(post);
-    if (!name) return null;
+  function filterReason(post) {
+    if (!matcher) return null;
+    const caption = findIn(post, CAPTION_SELECTORS[SITE], 1).map((e) => e.innerText || e.textContent || "").join(" ");
+    let r = matcher.checkText(caption);
+    if (r) return `caption: ${r}`;
 
-    // আরবি নাম
-    if (blockOn && ((name.match(ARABIC) || []).length >= 1 || ARABIC_SIGN.test(name))) {
-      return "profile: আরবি নাম";
+    // পোস্টের বাকি লেখা: লেখকের নাম মুছে (নামের "Islam" ইত্যাদিতে ভুল না হয়)
+    const authorEls = findIn(post, AUTHOR_SELECTORS[SITE], 2);
+    let body = post.innerText || "";
+    for (const el of authorEls) {
+      const s = (el.innerText || el.textContent || "").trim();
+      if (s.length > 1) body = body.split(s).join(" ");
     }
-    // _ . - কে ফাঁকা ধরে সাধারণ মিল ("islamic_reminder" → "islamic reminder")
-    const spaced = name.replace(/[_.\-]+/g, " ");
-    const m = blockRegex && spaced.match(blockRegex);
-    if (m) return `profile: ${m[0]}`;
+    r = matcher.checkText(body);
+    if (r) return r;
 
-    // জোড়া লাগানো নাম ("QuranDaily", "masjidvibes")
-    const compact = name.toLowerCase().replace(/[\s_.\-]+/g, "");
-    for (const w of blockWordsLong) if (compact.includes(w)) return `profile: ${w}`;
+    r = matcher.checkName(authorName(authorEls));
+    if (r) return `profile: ${r}`;
     return null;
   }
 
@@ -298,7 +271,9 @@
     return /\b(promoted|sponsored)\b|প্রচারিত|স্পনসর|বিজ্ঞাপন/i.test(head);
   }
 
-  // ---- site অনুযায়ী like বাটন ----
+  // =====================================================================
+  // site অনুযায়ী like বাটন
+  // =====================================================================
   const LIKE_WORDS = /like|react|পছন্দ|লাইক/i;
   const NOT_LIKE_WORDS = /comment|share|repost|send|reply|unlike|মন্তব্য|শেয়ার/i;
 
@@ -367,8 +342,7 @@
       },
       liked(btn) {
         if (btn.getAttribute("aria-pressed") === "true") return true;
-        const aria = btn.getAttribute("aria-label") || "";
-        return /remove like|unlike|change .*reaction/i.test(aria);
+        return /remove like|unlike|change .*reaction/i.test(btn.getAttribute("aria-label") || "");
       }
     },
 
@@ -378,8 +352,7 @@
         const out = [];
         document.querySelectorAll('svg[aria-label="Like"], svg[aria-label="লাইক"], svg[aria-label="পছন্দ"]')
           .forEach((svg) => {
-            // comment-এর ছোট heart বাদ (পোস্টের heart ২৪px)
-            if (svg.getBoundingClientRect().height < 20) return;
+            if (svg.getBoundingClientRect().height < 20) return; // comment-এর ছোট heart বাদ
             out.push(svg.closest('button,[role="button"]') || svg);
           });
         return out;
@@ -402,7 +375,9 @@
   };
   const S = SITES[SITE];
 
-  // ---- helpers ----
+  // =====================================================================
+  // helpers
+  // =====================================================================
   function vh() { return innerHeight > 100 ? innerHeight : viewH; }
   function vw() { return innerWidth > 100 ? innerWidth : viewW; }
 
@@ -420,11 +395,9 @@
     return Array.from(new Set(S.find())).filter(inViewport);
   }
 
+  // feed: এখনো সিদ্ধান্ত না হওয়া, screen-এর মাঝের কাছের পোস্টের like বাটন
   function pickTarget(buttons) {
-    let pool = FEED ? buttons.filter((b) => !S.liked(b) && !clicked.has(b)) : buttons;
-    if (!pool.length && SITE === "tiktok") {
-      pool = Array.from(document.querySelectorAll("video")).filter(inViewport);
-    }
+    const pool = buttons.filter((b) => !S.liked(b) && !clicked.has(b));
     pool.sort((a, b) => distToCenter(a) - distToCenter(b));
     return pool[0] || null;
   }
@@ -437,18 +410,7 @@
     return n;
   }
 
-  const readTimes = new WeakMap();
-  function readTime(post) {
-    if (!readTimes.has(post)) {
-      const len = (post.innerText || "").length;
-      readTimes.set(post, Math.min(15000, 2000 + Math.min(len, 1500) * 12) * rand(0.8, 1.2));
-    }
-    return readTimes.get(post);
-  }
-
-  // useGap=false হলে (TikTok) অন্য site-এর ১–৩ মিনিট বিরতির হিসাবে ধরা হয় না
-  function doLike(btn, useGap = true) {
-    clicked.add(btn);
+  function doLike(btn) {
     if (S.liked(btn)) { log("already liked"); return; }
     // কিছু site শুধু click() নয়, mouse event-ও দেখে; click একবারই হয়
     for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
@@ -456,40 +418,101 @@
     }
     btn.click();
     likes++;
-    if (useGap) {
-      lastLikeAt = Date.now();
-      nextGap = randGap();
-      chrome.storage.local.set({ lastLikeAt });
-    }
     log("liked");
-
-    // ১৫টা like হলে বিরতি
-    batchLikes++;
-    if (breakAfter > 0 && batchLikes >= breakAfter && breakMin > 0) {
-      breakUntil = Date.now() + breakMin * 60000;
-      batchLikes = 0;
-      log(`${breakAfter}টা like হয়েছে - ${breakMin} মিনিট বিরতি`);
-    }
-    chrome.storage.local.set({ batchLikes, breakUntil });
+    recordLike(Date.now());
   }
 
-  // ---- LinkedIn: পোস্ট মাঝখানে আনা → ৩০–৫০ সেকেন্ড অপেক্ষা → like → পরের পোস্ট ----
-  // t = এখনো সিদ্ধান্ত না হওয়া, screen-এর মাঝের কাছের পোস্টের like বাটন
-  function linkedinStep(t) {
+  // filter → বিজ্ঞাপন → % → like
+  function decide(btn, post) {
+    const bad = filterReason(post);
+    if (bad) { skipped++; log(`skip: ${bad}`); return; }
+    if (isPromoted(post)) { skipped++; log("ad - skip"); return; }
+    if (Math.random() > rule.chance) { skipped++; log("skipped (random)"); return; }
+    doLike(btn);
+  }
+
+  // =====================================================================
+  // scroll
+  // =====================================================================
+  const behavior = () => (document.hidden ? "auto" : "smooth"); // minimize-এ smooth চলে না
+  const pageScroller = () => document.scrollingElement || document.documentElement;
+
+  function scrollerFor(el) {
+    let n = el && el.parentElement;
+    while (n && n !== document.body) {
+      const s = getComputedStyle(n);
+      if (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 20) return n;
+      n = n.parentElement;
+    }
+    return pageScroller();
+  }
+
+  function scrollNext(anchor) {
+    cooldownUntil = Date.now() + speed.cooldown;
+    const box = scrollerFor(anchor || document.querySelector("video") || document.body);
+    const before = box.scrollTop;
+    const amount = SITE === "tiktok" ? (box.clientHeight || vh()) : Math.round(vh() * rand(0.6, 0.85));
+    box.scrollBy({ top: amount, behavior: behavior() });
+    scrolls++;
+    log("scrolled");
+
+    setTimeout(() => {
+      if (Math.abs(box.scrollTop - before) > 5) return;
+      if (SITE === "tiktok") {
+        const ev = { key: "ArrowDown", code: "ArrowDown", keyCode: 40, which: 40, bubbles: true };
+        document.body.dispatchEvent(new KeyboardEvent("keydown", ev));
+        document.dispatchEvent(new KeyboardEvent("keydown", ev));
+      }
+      window.scrollBy({ top: amount, behavior: behavior() });
+      log("scroll fallback");
+    }, 700);
+  }
+
+  // পোস্ট screen-এর মাঝখানে আনা। লম্বা পোস্টে like বাটন যেন screen-এ থাকে।
+  function centerPost(btn) {
+    const post = postOf(btn);
+    const tall = post.getBoundingClientRect().height > vh() * 0.9;
+    (tall ? btn : post).scrollIntoView({ behavior: behavior(), block: "center" });
+    scrolls++;
+    cooldownUntil = Date.now() + 1000;
+    if (state.humanize) {
+      // ঠিক মাঝখানে নয়, একটু এদিক-ওদিক (মানুষের মতো)
+      const off = Math.round(rand(-100, 100));
+      setTimeout(() => pageScroller().scrollBy({ top: off, behavior: behavior() }), 700);
+    }
+  }
+
+  // মানুষের মতো: মাঝে মাঝে একটু উপরে ফিরে দেখা
+  function glanceBack() {
+    pageScroller().scrollBy({ top: -Math.round(rand(150, 350)), behavior: behavior() });
+    cooldownUntil = Date.now() + rand(1500, 3000);
+    log("একটু উপরে ফিরে দেখা");
+  }
+
+  // =====================================================================
+  // Feed (LinkedIn, Facebook, Instagram, X):
+  // পোস্ট মাঝখানে → অপেক্ষা → like/বাদ → পরের পোস্ট
+  // =====================================================================
+  function feedStep(t, now) {
+    if (now < idleUntil) { lastMsg = `একটু বিরতি ${fmt(idleUntil - now)}`; return; }
+
     if (!t) {
-      // screen-এ নতুন পোস্ট নেই: নিচে scroll করে আনা
       lastMsg = "পরের পোস্ট খুঁজছে...";
-      if (state.autoScroll && elapsed >= 1500) { elapsed = 0; target = null; scrollNext(null); }
+      if (state.autoScroll && elapsed >= speed.search) { elapsed = 0; target = null; scrollNext(null); }
       return;
     }
 
-    // ১. পোস্টটা screen-এর মাঝখানে আনা (একবার)
+    // সীমা পূর্ণ হলে like-ও না, scroll-ও না (শুধু scroll করে যাওয়াও bot-এর মতো দেখায়)
+    if (state.autoLike) {
+      const lim = limitHit(now);
+      if (lim) { lastMsg = `${lim.why} - ${fmt(lim.until - now)} পর আবার`; elapsed = 0; return; }
+    }
+
+    // ১. পোস্ট মাঝখানে আনা (একবার)
     if (state.autoScroll && !centered.has(t)) {
       centered.add(t);
-      postOf(t).scrollIntoView({ behavior: document.hidden ? "auto" : "smooth", block: "center" });
-      scrolls++;
+      centerPost(t);
       elapsed = 0;
-      cooldownUntil = Date.now() + 1000;
       return;
     }
 
@@ -499,19 +522,23 @@
       return;
     }
 
-    // ৩. সিদ্ধান্ত: like বা বাদ, তারপর পরের পোস্ট
+    // ৩. সিদ্ধান্ত
     clicked.add(t);
     target = null;
-    if (!state.autoLike) { log("পরের পোস্ট"); return; }
-    const post = postOf(t);
-    const bad = blockedWord(post);
-    if (bad) { skipped++; log(`skip: "${bad}"`); }
-    else if (isPromoted(post)) { log("ad - skip"); }
-    else if (Math.random() > liChance) { skipped++; log("skipped (random)"); }
-    else doLike(t, false);
+    if (state.autoLike) decide(t, postOf(t));
+    else log("পরের পোস্ট");
+
+    // ৪. মানুষের মতো: মাঝে মাঝে থামা বা একটু উপরে ফিরে দেখা
+    if (state.humanize) {
+      const r = Math.random();
+      if (r < 0.10) { idleUntil = now + rand(20, 60) * SECOND; log("একটু বিরতি"); }
+      else if (r < 0.15 && state.autoScroll) glanceBack();
+    }
   }
 
-  // ---- TikTok: স্ক্রিনে সবচেয়ে বেশি দেখা যাওয়া ভিডিওর item ----
+  // =====================================================================
+  // TikTok: ভিডিও দেখা → like/বাদ → পরের ভিডিও
+  // =====================================================================
   function tiktokItem() {
     let best = null, bestArea = 0;
     document.querySelectorAll("video").forEach((v) => {
@@ -524,25 +551,27 @@
     return best.closest('article,[data-e2e="recommend-list-item-container"]') || best;
   }
 
-  // item-এর like বাটন: item-এর ভেতরে, না পেলে স্ক্রিনের মাঝের কাছেরটা
+  // item-এর like বাটন: item-এর ভেতরে, না পেলে screen-এর মাঝের কাছেরটা
   function tiktokLikeButton(item, buttons) {
     const inside = buttons.filter((b) => item.contains(b));
     const pool = inside.length ? inside : buttons;
     return pool.slice().sort((a, b) => distToCenter(a) - distToCenter(b))[0] || null;
   }
 
-  // ---- TikTok: ভিডিও দেখা → like/skip → পরের ভিডিও ----
-  function tiktokStep(t, buttons) {
+  function tiktokStep(t, buttons, now) {
     if (!t) {
-      // ভিডিও খুঁজে না পেলে কিছুক্ষণ পর scroll
-      if (state.autoScroll && elapsed >= ttMax * 1000) { elapsed = 0; target = null; scrollNext(null); }
+      if (state.autoScroll && elapsed >= rule.max * SECOND) { elapsed = 0; target = null; scrollNext(null); }
       return;
     }
 
     if (ttDecided !== t) {
-      const left = Math.ceil((watchFor - elapsed) / 1000);
-      lastMsg = `watching ${Math.max(0, left)}s`;
-      if (elapsed < watchFor) return;
+      if (state.autoLike) {
+        const lim = limitHit(now);
+        if (lim) { lastMsg = `${lim.why} - ${fmt(lim.until - now)} পর আবার`; elapsed = 0; return; }
+      }
+      const left = watchFor - elapsed;
+      lastMsg = `watching ${Math.max(0, Math.ceil(left / 1000))}s`;
+      if (left > 0) return;
 
       // দেখা শেষ: সিদ্ধান্ত
       if (!state.autoLike || clicked.has(t)) {
@@ -552,7 +581,6 @@
       }
       const btn = tiktokLikeButton(t, buttons);
       if (!btn) {
-        // বাটন এখনো load হয়নি: আরো ৩ সেকেন্ড চেষ্টা
         if (elapsed < watchFor + 3000) { lastMsg = "like button খুঁজছে..."; return; }
         log("like button পাওয়া যায়নি");
         ttDecided = t;
@@ -562,12 +590,7 @@
       ttDecided = t;
       ttScrollAt = elapsed + rand(500, 1500); // like-এর পর একটু থেমে scroll
       clicked.add(t);
-      const post = t.tagName === "VIDEO" ? postOf(t) : t;
-      const bad = blockedWord(post);
-      if (bad) { skipped++; log(`skip: "${bad}"`); }
-      else if (isPromoted(post)) { log("ad - skip"); }
-      else if (Math.random() > ttChance) { skipped++; log("skipped (random)"); }
-      else doLike(btn, false);
+      decide(btn, t.tagName === "VIDEO" ? postOf(t) : t);
       return;
     }
 
@@ -578,40 +601,9 @@
     }
   }
 
-  function scrollerFor(el) {
-    let n = el && el.parentElement;
-    while (n && n !== document.body) {
-      const s = getComputedStyle(n);
-      if (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 20) return n;
-      n = n.parentElement;
-    }
-    return document.scrollingElement || document.documentElement;
-  }
-
-  function scrollNext(anchor) {
-    cooldownUntil = Date.now() + cfg.cooldown;
-    // minimize অবস্থায় smooth animation চলে না, তাই সরাসরি scroll
-    const behavior = document.hidden ? "auto" : "smooth";
-    const box = scrollerFor(anchor || document.querySelector("video") || document.body);
-    const before = box.scrollTop;
-    const amount = SITE === "tiktok" ? (box.clientHeight || vh()) : Math.round(vh() * 0.75);
-    box.scrollBy({ top: amount, behavior });
-    scrolls++;
-    log("scrolled");
-
-    setTimeout(() => {
-      if (Math.abs(box.scrollTop - before) > 5) return;
-      if (SITE === "tiktok") {
-        const ev = { key: "ArrowDown", code: "ArrowDown", keyCode: 40, which: 40, bubbles: true };
-        document.body.dispatchEvent(new KeyboardEvent("keydown", ev));
-        document.dispatchEvent(new KeyboardEvent("keydown", ev));
-      }
-      window.scrollBy({ top: amount, behavior });
-      log("scroll fallback");
-    }, 700);
-  }
-
-  // ---- এক ধাপ কাজ (background বা নিজের timer থেকে ডাকা হয়) ----
+  // =====================================================================
+  // এক ধাপ কাজ (background বা নিজের timer থেকে ডাকা হয়)
+  // =====================================================================
   function tick() {
     const now = Date.now();
     if (now - lastTickAt < 200) return; // দুই উৎস থেকে একসাথে এলে একবারই
@@ -623,19 +615,32 @@
 
     const buttons = findLikeButtons();
     renderBadge(buttons.length);
-    // নির্দিষ্ট সময় পরপর page reload (reload-এর পর নিজে থেকে আবার চলবে)
-    if (reloadEvery > 0 && now - pageStartedAt >= reloadEvery * 60000) {
+
+    // ১. প্ল্যাটফর্মের সতর্কবার্তা → এই site ২৪ ঘণ্টা বন্ধ
+    const warning = state.stopOnWarning && detectWarning(now);
+    if (warning) {
+      siteBlockedUntil = { ...siteBlockedUntil, [SITE]: now + DAY };
+      chrome.storage.local.set({ siteBlockedUntil, lastWarning: { site: SITE, text: warning, at: now } });
+      log(`⚠️ সতর্কবার্তা "${warning}" - ২৪ ঘণ্টা বন্ধ`);
+    }
+    const blockedUntil = siteBlockedUntil[SITE] || 0;
+    if (now < blockedUntil) {
+      lastMsg = `⚠️ সতর্কবার্তা পেয়ে বন্ধ - ${fmt(blockedUntil - now)} পর আবার`;
+      target = null; elapsed = 0;
+      return;
+    }
+
+    // ২. নির্দিষ্ট সময় পরপর page reload (reload-এর পর নিজে থেকে আবার চলবে)
+    if (reloadEvery > 0 && now - pageStartedAt >= reloadEvery * MINUTE) {
       log("page reload...");
       location.reload();
       return;
     }
 
-    // বিরতি চলছে
+    // ৩. ১৫টা like-এর পর বিরতি
     if (now < breakUntil) {
-      const s = Math.ceil((breakUntil - now) / 1000);
-      lastMsg = `বিরতি ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} বাকি`;
-      target = null;
-      elapsed = 0;
+      lastMsg = `বিরতি ${fmt(breakUntil - now)} বাকি`;
+      target = null; elapsed = 0;
       return;
     }
 
@@ -645,50 +650,17 @@
     if (t !== target) {
       target = t;
       elapsed = 0;
-      watchFor =
-        SITE === "tiktok" ? rand(Math.min(ttMin, ttMax), Math.max(ttMin, ttMax)) * 1000 :
-        SITE === "linkedin" ? rand(Math.min(liMin, liMax), Math.max(liMin, liMax)) * 1000 :
-        rand(cfg.watch[0], cfg.watch[1]);
+      watchFor = rand(rule.min, rule.max) * SECOND;
     }
     elapsed += dt;
 
-    if (SITE === "linkedin") { linkedinStep(t); return; }
-
-    if (SITE === "tiktok") { tiktokStep(t, buttons); return; }
-
-    const waitLeft = lastLikeAt + nextGap - now;
-    if (state.autoLike && waitLeft > 0) lastMsg = `next like ${Math.ceil(waitLeft / 1000)}s`;
-
-    let reading = false;
-    if (state.autoLike && waitLeft <= 0 && t && t.tagName !== "VIDEO" && !clicked.has(t)) {
-      const post = postOf(t);
-      const bad = blockedWord(post);
-      if (bad) {
-        clicked.add(t); skipped++; log(`skip: "${bad}"`);
-        if (FEED) target = null;
-      } else if (isPromoted(post)) {
-        clicked.add(t); log("ad - skip");
-        if (FEED) target = null;
-      } else if (elapsed < Math.max(cfg.likeAfter, readTime(post))) {
-        reading = true;
-        lastMsg = `reading ${Math.ceil((readTime(post) - elapsed) / 1000)}s`;
-      } else if (Math.random() > likeChance) {
-        clicked.add(t); skipped++; log("skipped (random)");
-        if (FEED) target = null;
-      } else {
-        doLike(t);
-        if (FEED) target = null;
-      }
-    }
-
-    if (state.autoScroll && !reading && elapsed >= watchFor) {
-      target = null;
-      elapsed = 0;
-      scrollNext(t);
-    }
+    if (FEED) feedStep(t, now);
+    else tiktokStep(t, buttons, now);
   }
 
-  // ---- ticker: background port (minimize-এও চলে) + নিজের timer (backup) ----
+  // =====================================================================
+  // ticker: background port (minimize-এও চলে) + নিজের timer (backup)
+  // =====================================================================
   let port = null;
   function connect() {
     if (port || !isOn()) return;

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Auto Like & Scroll (TikTok, LinkedIn, Facebook, Instagram, X)",
-  "version": "2.7.1",
-  "description": "TikTok, LinkedIn, Facebook, Instagram ও X-এ auto like ও auto scroll - minimize অবস্থাতেও চলে।",
+  "version": "3.0.0",
+  "description": "TikTok, LinkedIn, Facebook, Instagram ও X-এ auto like ও auto scroll - site অনুযায়ী নিরাপদ সীমা, ধর্মীয়/রাজনৈতিক filter, minimize অবস্থাতেও চলে।",
   "permissions": ["storage", "scripting", "tabs"],
   "host_permissions": [
     "https://*.tiktok.com/*",
@@ -27,7 +27,7 @@
         "https://*.x.com/*",
         "https://*.twitter.com/*"
       ],
-      "js": ["content.js"],
+      "js": ["config.js", "filter.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

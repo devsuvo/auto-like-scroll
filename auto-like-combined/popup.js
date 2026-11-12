@@ -1,77 +1,79 @@
 const $ = (id) => document.getElementById(id);
-
-const SITE_NAMES = {
-  tiktok: "TikTok", linkedin: "LinkedIn", facebook: "Facebook",
-  instagram: "Instagram", twitter: "X / Twitter"
-};
-
-const DEFAULTS = {
-  autoLike: false, autoScroll: false, speed: "slow",
-  gapMinMin: 1, gapMaxMin: 3, likeChance: 60,
-  ttWatchMin: 8, ttWatchMax: 8, ttLikeChance: 100,
-  liWaitMin: 30, liWaitMax: 50, liLikeChance: 100,
-  breakAfter: 15, breakMin: 5, reloadEvery: 10,
-  blockSensitive: true, blockWords: "",
-  sites: { tiktok: true, linkedin: true, facebook: true, instagram: true, twitter: true },
-  enabledTabs: []
-};
+const CFG = globalThis.AutoLikeConfig;
+const { SITE_NAMES, RULE_KEYS, RULE_DEFAULTS, TIPS, DEFAULTS, siteFromHost } = CFG;
+const HOUR = 3600 * 1000, DAY = 24 * HOUR;
 
 let currentTab = null;
 let currentSite = null;
+let ruleSite = "tiktok"; // "Site-এর নিয়ম" কার্ডে যে site দেখানো হচ্ছে
 
-function siteFromUrl(url) {
-  let h = "";
-  try { h = new URL(url).hostname; } catch (e) { return null; }
-  if (h.endsWith("tiktok.com")) return "tiktok";
-  if (h.endsWith("linkedin.com")) return "linkedin";
-  if (h.endsWith("facebook.com")) return "facebook";
-  if (h.endsWith("instagram.com")) return "instagram";
-  if (h === "x.com" || h.endsWith(".x.com") || h.endsWith("twitter.com")) return "twitter";
-  return null;
+function fmtLeft(ms) {
+  const m = Math.max(1, Math.ceil(ms / 60000));
+  return m >= 60 ? `${Math.floor(m / 60)} ঘণ্টা ${m % 60} মিনিট` : `${m} মিনিট`;
 }
 
-// উপরের অংশ: এই tab-এর অবস্থা
+// ---- উপরের অংশ: এই tab-এর অবস্থা ----
 function renderHero(v) {
+  const now = Date.now();
   const tabOn = currentTab && v.enabledTabs.includes(currentTab.id);
   const siteOn = currentSite && v.sites[currentSite] !== false;
   const doing = v.autoLike || v.autoScroll;
+  const blockedUntil = currentSite ? (v.siteBlockedUntil || {})[currentSite] || 0 : 0;
+  const blocked = blockedUntil > now;
 
   $("siteName").textContent = currentSite ? SITE_NAMES[currentSite] : "সমর্থিত site নয়";
   $("tabOn").checked = !!tabOn;
   $("tabOn").disabled = !currentSite;
+  $("unblock").hidden = !blocked;
 
-  const pill = $("tabState");
   let text = "বন্ধ", cls = "off";
-  if (!currentSite) { text = "এই page-এ চলবে না"; }
+  if (!currentSite) text = "এই page-এ চলবে না";
+  else if (blocked) { text = `সতর্কবার্তা পেয়ে বন্ধ (${fmtLeft(blockedUntil - now)} বাকি)`; cls = "bad"; }
   else if (tabOn && !siteOn) { text = `${SITE_NAMES[currentSite]} নিচে বন্ধ করা`; cls = "warn"; }
   else if (tabOn && !doing) { text = "Like/Scroll কোনোটাই চালু নয়"; cls = "warn"; }
   else if (tabOn) { text = "এই tab-এ চলছে"; cls = "on"; }
-  pill.textContent = text;
-  pill.className = "pill " + cls;
+  $("tabState").textContent = text;
+  $("tabState").className = "pill " + cls;
+
+  const w = v.lastWarning;
+  if (blocked && w && w.site === currentSite) {
+    $("status").textContent = `${SITE_NAMES[currentSite]} দেখিয়েছে: "${w.text}"। আগে ঐ বার্তা বন্ধ করুন, তারপর চালু করুন।`;
+  }
+}
+
+// ---- site-এর নিয়ম ----
+function renderRule(v) {
+  const k = RULE_KEYS[ruleSite];
+  $("ruleSite").value = ruleSite;
+  $("ruleMin").value = v[k.min];
+  $("ruleMax").value = v[k.max];
+  $("ruleChance").value = v[k.chance];
+  $("ruleHourly").value = v[k.hourly];
+  $("ruleDaily").value = v[k.daily];
+  $("ruleWaitLabel").textContent = ruleSite === "tiktok" ? "প্রতিটা ভিডিও দেখবে" : "প্রতিটা পোস্টে অপেক্ষা";
+  $("ruleTip").textContent = TIPS[ruleSite];
+
+  const now = Date.now();
+  const list = (v.likeLog || {})[ruleSite] || [];
+  const hour = list.filter((t) => now - t < HOUR).length;
+  const day = list.filter((t) => now - t < DAY).length;
+  $("ruleCount").textContent = `${SITE_NAMES[ruleSite]}: শেষ ১ ঘণ্টায় ${hour}টা, ২৪ ঘণ্টায় ${day}টা like`;
 }
 
 function render(v) {
-  $("autoLike").checked = !!v.autoLike;
-  $("autoScroll").checked = !!v.autoScroll;
+  for (const id of ["autoLike", "autoScroll", "blockSensitive", "humanize", "stopOnWarning"]) {
+    $(id).checked = !!v[id];
+  }
   $("speed").value = v.speed;
-  $("gapMinMin").value = v.gapMinMin;
-  $("gapMaxMin").value = v.gapMaxMin;
-  $("likeChance").value = v.likeChance;
-  $("ttWatchMin").value = v.ttWatchMin;
-  $("ttWatchMax").value = v.ttWatchMax;
-  $("ttLikeChance").value = v.ttLikeChance;
-  $("liWaitMin").value = v.liWaitMin;
-  $("liWaitMax").value = v.liWaitMax;
-  $("liLikeChance").value = v.liLikeChance;
   $("breakAfter").value = v.breakAfter;
   $("breakMin").value = v.breakMin;
   $("reloadEvery").value = v.reloadEvery;
-  $("blockSensitive").checked = v.blockSensitive !== false;
   $("blockWords").value = v.blockWords;
   document.querySelectorAll("[data-site]").forEach((el) => {
     el.checked = v.sites[el.dataset.site] !== false;
   });
   renderHero(v);
+  renderRule(v);
 }
 
 function reload() {
@@ -82,7 +84,10 @@ function reload() {
 async function ensureInjected() {
   if (!currentTab || !currentSite) return;
   try {
-    await chrome.scripting.executeScript({ target: { tabId: currentTab.id }, files: ["content.js"] });
+    await chrome.scripting.executeScript({
+      target: { tabId: currentTab.id },
+      files: ["config.js", "filter.js", "content.js"]
+    });
   } catch (e) {
     $("status").textContent = "চালু করা যায়নি: " + e.message + " (tab refresh করুন)";
   }
@@ -98,26 +103,58 @@ $("tabOn").addEventListener("change", () => {
   });
 });
 
-for (const id of ["autoLike", "autoScroll", "blockSensitive"]) {
+for (const id of ["autoLike", "autoScroll", "blockSensitive", "humanize", "stopOnWarning"]) {
   $(id).addEventListener("change", () => chrome.storage.local.set({ [id]: $(id).checked }, reload));
 }
 
 $("speed").addEventListener("change", () => chrome.storage.local.set({ speed: $("speed").value }));
 $("blockWords").addEventListener("change", () => chrome.storage.local.set({ blockWords: $("blockWords").value }));
 
-const NUM_FIELDS = {
-  gapMinMin: [0, 60], gapMaxMin: [0, 60], likeChance: [0, 100],
-  ttWatchMin: [1, 120], ttWatchMax: [1, 120], ttLikeChance: [0, 100],
-  liWaitMin: [1, 600], liWaitMax: [1, 600], liLikeChance: [0, 100],
-  breakAfter: [0, 1000], breakMin: [0, 600], reloadEvery: [0, 600]
-};
+function clampInput(el, lo, hi, whole) {
+  let n = parseFloat(el.value);
+  if (!Number.isFinite(n)) n = lo;
+  n = Math.min(hi, Math.max(lo, whole ? Math.round(n) : n));
+  el.value = n;
+  return n;
+}
+
+const NUM_FIELDS = { breakAfter: [0, 1000], breakMin: [0, 600], reloadEvery: [0, 600] };
 for (const [id, [lo, hi]] of Object.entries(NUM_FIELDS)) {
+  $(id).addEventListener("change", () => chrome.storage.local.set({ [id]: clampInput($(id), lo, hi, true) }));
+}
+
+// site-এর নিয়মের ঘর: id → [কোন নিয়ম, কম, বেশি, পূর্ণসংখ্যা?]
+const RULE_FIELDS = {
+  ruleMin: ["min", 1, 600, false],
+  ruleMax: ["max", 1, 600, false],
+  ruleChance: ["chance", 0, 100, true],
+  ruleHourly: ["hourly", 0, 1000, true],
+  ruleDaily: ["daily", 0, 10000, true]
+};
+for (const [id, [field, lo, hi, whole]] of Object.entries(RULE_FIELDS)) {
   $(id).addEventListener("change", () => {
-    const n = Math.min(hi, Math.max(lo, parseFloat($(id).value) || 0));
-    $(id).value = n;
-    chrome.storage.local.set({ [id]: n });
+    chrome.storage.local.set({ [RULE_KEYS[ruleSite][field]]: clampInput($(id), lo, hi, whole) }, reload);
   });
 }
+
+$("ruleSite").addEventListener("change", () => {
+  ruleSite = $("ruleSite").value;
+  reload();
+});
+
+$("ruleReset").addEventListener("click", () => {
+  const d = {};
+  for (const key of Object.values(RULE_KEYS[ruleSite])) d[key] = RULE_DEFAULTS[key];
+  chrome.storage.local.set(d, reload);
+});
+
+$("unblock").addEventListener("click", () => {
+  chrome.storage.local.get({ siteBlockedUntil: {} }, (v) => {
+    const s = { ...v.siteBlockedUntil };
+    delete s[currentSite];
+    chrome.storage.local.set({ siteBlockedUntil: s }, reload);
+  });
+});
 
 document.querySelectorAll("[data-site]").forEach((el) => {
   el.addEventListener("change", () => {
@@ -150,8 +187,16 @@ $("bgWindow").addEventListener("click", () => {
 
 // ---- শুরু ----
 $("ver").textContent = "v" + chrome.runtime.getManifest().version;
+const st = globalThis.AutoLikeFilter && globalThis.AutoLikeFilter.stats;
+if (st) {
+  $("filterStats").textContent =
+    `ইসলামিক ${st.islamic}টি, অন্য ধর্ম ${st.religion}টি, রাজনৈতিক ${st.politics}টি শব্দ + আরবি লেখা`;
+}
 chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
   currentTab = tab || null;
-  currentSite = tab ? siteFromUrl(tab.url || "") : null;
+  let host = "";
+  try { host = new URL((tab && tab.url) || "").hostname; } catch (e) { /* chrome:// ইত্যাদি */ }
+  currentSite = siteFromHost(host);
+  ruleSite = currentSite || "tiktok";
   reload();
 });
