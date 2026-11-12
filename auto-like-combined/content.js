@@ -29,7 +29,9 @@
   let lastLikeAt = 0;         // সব tab মিলিয়ে শেষ like-এর সময়
   let nextGap = 60000;
 
-  const state = { autoLike: false, autoScroll: false };
+  // autoLike/autoScroll: কী করবে; siteOn: এই site চালু কিনা; tabOn: এই tab চালু কিনা
+  const state = { autoLike: false, autoScroll: false, siteOn: true, tabOn: false };
+  let myTabId = null;
   const clicked = new WeakSet();
   let target = null;
   let elapsed = 0;
@@ -42,7 +44,8 @@
 
   const rand = (a, b) => a + Math.random() * (b - a);
   const log = (m) => { lastMsg = m; console.log("[AutoLike]", m); };
-  const isOn = () => state.autoLike || state.autoScroll;
+  const isOn = () =>
+    (state.autoLike || state.autoScroll) && state.siteOn && state.tabOn;
 
   // ---- status box ----
   const badge = document.createElement("div");
@@ -73,16 +76,20 @@
   }
 
   const DEFAULTS = {
-    autoLike: false, autoScroll: false, speed: "fast",
+    autoLike: false, autoScroll: false, speed: "slow",
     gapMinMin: 1, gapMaxMin: 3, likeChance: 60, lastLikeAt: 0,
-    blockSensitive: true, blockWords: ""
+    blockSensitive: true, blockWords: "",
+    sites: { tiktok: true, linkedin: true, facebook: true, instagram: true, twitter: true },
+    enabledTabs: []
   };
 
   function loadAll() {
     chrome.storage.local.get(DEFAULTS, (v) => {
       state.autoLike = !!v.autoLike;
       state.autoScroll = !!v.autoScroll;
-      cfg = SPEEDS[v.speed] || SPEEDS.fast;
+      state.siteOn = (v.sites || {})[SITE] !== false;
+      state.tabOn = myTabId != null && (v.enabledTabs || []).includes(myTabId);
+      cfg = SPEEDS[v.speed] || SPEEDS.slow;
       applySettings(v);
       nextGap = randGap();
       lastLikeAt = v.lastLikeAt || 0;
@@ -428,5 +435,10 @@
   }
 
   setInterval(tick, 250);
-  loadAll();
+  // background থেকে নিজের tab id জেনে নেয়, তারপর সেটিং লোড
+  chrome.runtime.sendMessage({ type: "whoami" }, (res) => {
+    void chrome.runtime.lastError;
+    myTabId = res && res.tabId != null ? res.tabId : null;
+    loadAll();
+  });
 })();

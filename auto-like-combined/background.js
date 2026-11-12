@@ -16,6 +16,26 @@ chrome.runtime.onConnect.addListener((port) => {
   start();
 });
 
+// content script নিজের tab id জানতে চায়
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === "whoami") {
+    sendResponse({ tabId: sender.tab ? sender.tab.id : null });
+  }
+});
+
+// tab বন্ধ হলে চালু-tab তালিকা থেকে বাদ
+chrome.tabs.onRemoved.addListener((tabId) => {
+  chrome.storage.local.get({ enabledTabs: [] }, (v) => {
+    const list = (v.enabledTabs || []).filter((id) => id !== tabId);
+    if (list.length !== v.enabledTabs.length) chrome.storage.local.set({ enabledTabs: list });
+  });
+});
+
+// browser নতুন করে খুললে পুরনো tab id অর্থহীন, তাই খালি করা
+chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.set({ enabledTabs: [] });
+});
+
 function start() {
   if (timer) return;
   timer = setInterval(() => {

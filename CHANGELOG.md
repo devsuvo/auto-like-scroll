@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0 - auto-like-combined
+- শুধু চালু করা tab-এ চলে (অন্য tab/window-এ না)
+- site অনুযায়ী on/off (TikTok, LinkedIn, Facebook, Instagram, X)
+- নতুন popup design: এই tab-এর অবস্থা, ভাগ করা অংশ, dark mode
+- default গতি Slow
+
 ## 2.0.0 - auto-like-combined
 - Facebook, Instagram, X/Twitter যোগ
 - browser minimize বা অন্য tab-এ থাকলেও চলে (background ticker)
