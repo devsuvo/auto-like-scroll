@@ -196,10 +196,36 @@
   // আরবি অক্ষর
   const ARABIC = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-ﻼ]/g;
   const ARABIC_SIGN = /[ﷰ-﷽]/; // ﷺ ﷲ ﷻ
+  const ARABIC_ONE = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-ﻼ]/; // একটা হলেই
+
+  // ---- caption ----
+  const CAPTION_SELECTORS = {
+    tiktok: '[data-e2e="video-desc"],[data-e2e="browse-video-desc"],[data-e2e="video-caption"],' +
+            '[data-e2e="new-desc-span"],[data-e2e="search-card-desc"]',
+    linkedin: '.update-components-text,.feed-shared-update-v2__description,.feed-shared-text',
+    facebook: '[data-ad-preview="message"],[data-ad-comet-preview="message"]',
+    instagram: "h1,ul li span",
+    twitter: '[data-testid="tweetText"]'
+  };
+
+  function captionText(post) {
+    const sel = CAPTION_SELECTORS[SITE];
+    let els = Array.from(post.querySelectorAll(sel));
+    // TikTok নতুন design-এ caption ভিডিওর বাইরে: screen-এর মাঝের কাছেরটা
+    if (!els.length && SITE === "tiktok") {
+      els = Array.from(document.querySelectorAll(sel)).filter(inViewport);
+      els.sort((a, b) => distToCenter(a) - distToCenter(b));
+      els = els.slice(0, 1);
+    }
+    return els.map((e) => e.innerText || e.textContent || "").join(" ");
+  }
 
   function blockedWord(post) {
-    const text = post.innerText || "";
-    if (blockOn && (text.match(ARABIC) || []).length >= 3) return "আরবি লেখা";
+    const caption = captionText(post);
+    const text = (post.innerText || "") + " " + caption;
+    // caption-এ একটা আরবি অক্ষর থাকলেও বাদ
+    if (blockOn && ARABIC_ONE.test(caption)) return "caption-এ আরবি";
+    if (blockOn && (text.match(ARABIC) || []).length >= 1) return "আরবি লেখা";
     if (blockOn && ARABIC_SIGN.test(text)) return "আরবি চিহ্ন";
     if (!blockRegex) return null;
     const m = text.match(blockRegex);
@@ -253,7 +279,7 @@
     if (!name) return null;
 
     // আরবি নাম
-    if (blockOn && ((name.match(ARABIC) || []).length >= 3 || ARABIC_SIGN.test(name))) {
+    if (blockOn && ((name.match(ARABIC) || []).length >= 1 || ARABIC_SIGN.test(name))) {
       return "profile: আরবি নাম";
     }
     // _ . - কে ফাঁকা ধরে সাধারণ মিল ("islamic_reminder" → "islamic reminder")

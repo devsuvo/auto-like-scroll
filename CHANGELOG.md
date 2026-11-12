@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.7.1 - auto-like-combined
+- caption আলাদাভাবে খুঁজে পড়ে (TikTok-এ ভিডিওর বাইরের caption-ও)
+- একটা আরবি অক্ষর থাকলেও বাদ (আগে ৩টা লাগত); profile নামেও
+
 ## 2.7.0 - auto-like-combined
 - profile নাম ও username-ও পরীক্ষা করে (islamic_reminder, QuranDaily, আরবি নাম)
 - সব site-এর জন্য নাম খোঁজার নিয়ম; TikTok-এ ভিডিওর বাইরের নামও
