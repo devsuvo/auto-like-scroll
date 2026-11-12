@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.4.0 - auto-like-combined
+- popup-এ "কোণের ছোট window-এ সরাও" বাটন: minimize ছাড়াই background-এ চালানো (TikTok নতুন ভিডিও load করতে থাকে)
+
 ## 2.3.0 - auto-like-combined
 - TikTok default: প্রতিটা ভিডিও ৮ সেকেন্ড দেখে সব ভিডিওতে like (100%)
 - পুরনো সেটিং একবার নতুন মানে বদলানো

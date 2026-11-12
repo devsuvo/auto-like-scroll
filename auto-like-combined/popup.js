@@ -118,6 +118,26 @@ document.querySelectorAll("[data-site]").forEach((el) => {
   });
 });
 
+// minimize করলে Chrome page আঁকা বন্ধ করে, TikTok নতুন ভিডিও load করে না।
+// তাই tab-টা screen-এর ডান-নিচের কোণে ছোট window-এ সরানো হয়: চোখে পড়ে, page চলতে থাকে।
+$("bgWindow").addEventListener("click", () => {
+  if (!currentTab) return;
+  const w = 420, h = 720;
+  const left = Math.max(0, (screen.availLeft || 0) + screen.availWidth - w - 10);
+  const top = Math.max(0, (screen.availTop || 0) + screen.availHeight - h - 10);
+  chrome.windows.create(
+    { tabId: currentTab.id, type: "normal", width: w, height: h, left, top, focused: false },
+    () => {
+      if (chrome.runtime.lastError) {
+        $("status").textContent = "সরানো যায়নি: " + chrome.runtime.lastError.message;
+        return;
+      }
+      $("status").textContent = "সরানো হয়েছে। ঐ ছোট window minimize করবেন না, অন্য window-এর পাশে রাখুন।";
+      $("bgWindow").disabled = true;
+    }
+  );
+});
+
 // ---- শুরু ----
 $("ver").textContent = "v" + chrome.runtime.getManifest().version;
 chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {

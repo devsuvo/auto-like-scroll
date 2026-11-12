@@ -66,6 +66,13 @@
     details summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
     details[open] summary { margin-bottom: 6px; }
     .note { font-size: 11px; color: var(--muted); margin: 0; }
+    .btn {
+      width: 100%; margin-top: 8px; padding: 6px 8px; cursor: pointer;
+      font: inherit; font-size: 12px; color: var(--text);
+      background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    }
+    .btn:hover { border-color: var(--accent); }
+    .btn:disabled { opacity: .5; cursor: default; }
   </style>
 </head>
 <body>
@@ -87,6 +94,9 @@
       </label>
     </div>
     <p class="note" id="status" style="margin-top:6px">শুধু যে tab-এ চালু করবেন সেখানেই চলবে।</p>
+    <button id="bgWindow" class="btn" title="minimize না করে কোণের ছোট window-এ চালান">
+      ↘ কোণের ছোট window-এ সরাও (background-এ চলবে)
+    </button>
   </div>
 
   <!-- কী করবে -->
