@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Like & Scroll (TikTok + LinkedIn)",
+  "version": "1.0.1",
+  "description": "TikTok ও LinkedIn-এ auto like ও auto scroll - দুটোই on/off করা যাবে।",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.tiktok.com/*",
+    "https://www.linkedin.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.tiktok.com/*",
+        "https://www.linkedin.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Auto Like & Scroll"
+  }
+}

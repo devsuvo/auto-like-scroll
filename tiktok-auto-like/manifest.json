@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "TikTok Auto Like & Scroll",
+  "version": "1.0.0",
+  "description": "TikTok-এ auto like ও auto scroll - দুটোই on/off করা যাবে।",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.tiktok.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.tiktok.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "TikTok Auto Like"
+  }
+}
