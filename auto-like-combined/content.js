@@ -91,11 +91,21 @@
         });
       }
     } else {
+      // LinkedIn: পুরনো + নতুন design দুটোই
       document.querySelectorAll(
-        "button.react-button__trigger, button[aria-pressed]"
+        'button.react-button__trigger, button[aria-label*="reaction" i], button[aria-label*="like" i], ' +
+        '[role="button"][aria-label*="like" i], [role="button"][aria-label*="reaction" i], button, [role="button"]'
       ).forEach((b) => {
-        const l = labelOf(b);
-        if (LIKE_WORDS.test(l) && !NOT_LIKE_WORDS.test(l)) set.add(b);
+        const aria = b.getAttribute("aria-label") || "";
+        const text = (b.innerText || "").trim();
+        if (text.length > 40) return; // বড় container বাদ
+        const l = aria + " " + text;
+        if (NOT_LIKE_WORDS.test(l)) return;
+        if (b.classList.contains("react-button__trigger") ||
+            /reaction button state|react like|^like\b|^লাইক|^পছন্দ/i.test(aria) ||
+            /^(like|লাইক|পছন্দ)$/i.test(text)) {
+          set.add(b);
+        }
       });
     }
     return Array.from(set).filter(inViewport);
@@ -106,7 +116,7 @@
     let pool = buttons;
     if (SITE === "linkedin") {
       // LinkedIn: যেগুলো এখনো like দেওয়া হয়নি
-      pool = buttons.filter((b) => b.getAttribute("aria-pressed") !== "true" && !clicked.has(b));
+      pool = buttons.filter((b) => !isLiked(b) && !clicked.has(b));
     }
     if (!pool.length && SITE === "tiktok") {
       // like বাটন না পেলে অন্তত চলমান video ধরে scroll চালু থাকবে
@@ -118,6 +128,14 @@
 
   function isLiked(btn) {
     if (btn.getAttribute("aria-pressed") === "true") return true;
+    if (SITE === "linkedin") {
+      const aria = btn.getAttribute("aria-label") || "";
+      // "Reaction button state: no reaction" = like হয়নি; অন্য state = like করা
+      if (/reaction button state/i.test(aria)) return !/no reaction/i.test(aria);
+      if (/^unlike|remove.*reaction/i.test(aria)) return true;
+      if (/^liked$/i.test((btn.innerText || "").trim())) return true;
+      return false;
+    }
     // TikTok: like করা থাকলে আইকন লাল (fill) হয়
     const path = btn.querySelector("svg path, svg");
     if (path) {

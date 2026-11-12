@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 - auto-like-combined
+- LinkedIn নতুন design-এর like বাটন চেনা (role=button, "Reaction button state" label, aria-pressed ছাড়া)
+- LinkedIn-এ আগে like করা পোস্ট বাদ দেওয়া
+
 ## 1.1.0 - auto-like-combined
 - item selector-এর ওপর নির্ভরতা বাদ: like বাটন/video খুঁজে কাজ করে
 - আসল scrollable container খুঁজে scroll (TikTok-এ ArrowDown fallback)
