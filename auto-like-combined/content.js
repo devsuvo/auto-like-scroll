@@ -245,9 +245,15 @@
   }
   buildBlock("");
 
+  // আরবি অক্ষর (Arabic, Arabic Supplement/Extended, Presentation Forms)
+  const ARABIC = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/g;
+
   function blockedWord(post) {
+    const text = post.innerText || "";
+    // ৩টা বা তার বেশি আরবি অক্ষর থাকলে বাদ (ভুলবশত একটা অক্ষরে নয়)
+    if (blockOn && (text.match(ARABIC) || []).length >= 3) return "আরবি লেখা";
     if (!blockRegex) return null;
-    const m = (post.innerText || "").match(blockRegex);
+    const m = text.match(blockRegex);
     return m ? m[0] : null;
   }
 
