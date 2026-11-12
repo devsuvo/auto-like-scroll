@@ -151,10 +151,29 @@
     </details>
   </div>
 
+  <!-- LinkedIn-এর আলাদা নিয়ম -->
+  <div class="card">
+    <details>
+      <summary>LinkedIn-এর নিয়ম</summary>
+      <div class="row">
+        <span>প্রতিটা পোস্টে অপেক্ষা <small>সেকেন্ড (কম – বেশি), তারপর like</small></span>
+        <span>
+          <input type="number" id="liWaitMin" min="1" step="5"> –
+          <input type="number" id="liWaitMax" min="1" step="5">
+        </span>
+      </div>
+      <div class="row">
+        <span>কত % পোস্টে like</span>
+        <input type="number" id="liLikeChance" min="0" max="100" step="5">
+      </div>
+      <p class="note">পোস্ট screen-এর মাঝখানে এনে অপেক্ষা করে, like দিয়ে পরের পোস্টে যায়।</p>
+    </details>
+  </div>
+
   <!-- নিরাপত্তা -->
   <div class="card">
     <details>
-      <summary>Like-এর নিয়ম (LinkedIn, Facebook, Instagram, X)</summary>
+      <summary>Like-এর নিয়ম (Facebook, Instagram, X)</summary>
       <div class="row">
         <span>Like বিরতি <small>মিনিট (কম – বেশি)</small></span>
         <span>

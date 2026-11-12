@@ -9,6 +9,7 @@ const DEFAULTS = {
   autoLike: false, autoScroll: false, speed: "slow",
   gapMinMin: 1, gapMaxMin: 3, likeChance: 60,
   ttWatchMin: 8, ttWatchMax: 8, ttLikeChance: 100,
+  liWaitMin: 30, liWaitMax: 50, liLikeChance: 100,
   blockSensitive: true, blockWords: "",
   sites: { tiktok: true, linkedin: true, facebook: true, instagram: true, twitter: true },
   enabledTabs: []
@@ -58,6 +59,9 @@ function render(v) {
   $("ttWatchMin").value = v.ttWatchMin;
   $("ttWatchMax").value = v.ttWatchMax;
   $("ttLikeChance").value = v.ttLikeChance;
+  $("liWaitMin").value = v.liWaitMin;
+  $("liWaitMax").value = v.liWaitMax;
+  $("liLikeChance").value = v.liLikeChance;
   $("blockSensitive").checked = v.blockSensitive !== false;
   $("blockWords").value = v.blockWords;
   document.querySelectorAll("[data-site]").forEach((el) => {
@@ -99,7 +103,8 @@ $("blockWords").addEventListener("change", () => chrome.storage.local.set({ bloc
 
 const NUM_FIELDS = {
   gapMinMin: [0, 60], gapMaxMin: [0, 60], likeChance: [0, 100],
-  ttWatchMin: [1, 120], ttWatchMax: [1, 120], ttLikeChance: [0, 100]
+  ttWatchMin: [1, 120], ttWatchMax: [1, 120], ttLikeChance: [0, 100],
+  liWaitMin: [1, 600], liWaitMax: [1, 600], liLikeChance: [0, 100]
 };
 for (const [id, [lo, hi]] of Object.entries(NUM_FIELDS)) {
   $(id).addEventListener("change", () => {

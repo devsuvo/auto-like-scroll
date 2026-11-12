@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.0 - auto-like-combined
+- LinkedIn-এর আলাদা নিয়ম: পোস্ট মাঝখানে এনে ৩০–৫০ সেকেন্ড অপেক্ষা, তারপর like, তারপর পরের পোস্ট
+- popup-এ "LinkedIn-এর নিয়ম" অংশ (সেকেন্ড ও like %)
+
 ## 2.4.0 - auto-like-combined
 - popup-এ "কোণের ছোট window-এ সরাও" বাটন: minimize ছাড়াই background-এ চালানো (TikTok নতুন ভিডিও load করতে থাকে)
 

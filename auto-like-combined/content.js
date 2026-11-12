@@ -35,6 +35,11 @@
   let ttDecided = null;      // যে ভিডিওর সিদ্ধান্ত হয়ে গেছে
   let ttScrollAt = 0;
 
+  // LinkedIn-এর আলাদা নিয়ম: পোস্ট মাঝখানে এনে ৩০–৫০ সেকেন্ড অপেক্ষা, তারপর like
+  let liMin = 30, liMax = 50; // সেকেন্ড
+  let liChance = 1;           // কত % পোস্টে like
+  const centered = new WeakSet(); // যে পোস্ট মাঝখানে আনা হয়ে গেছে
+
   // autoLike/autoScroll: কী করবে; siteOn: এই site চালু কিনা; tabOn: এই tab চালু কিনা
   const state = { autoLike: false, autoScroll: false, siteOn: true, tabOn: false };
   let myTabId = null;
@@ -82,6 +87,9 @@
     if (v.ttWatchMin != null) ttMin = Math.max(1, Number(v.ttWatchMin) || 7);
     if (v.ttWatchMax != null) ttMax = Math.max(1, Number(v.ttWatchMax) || 8);
     if (v.ttLikeChance != null) ttChance = Math.min(100, Math.max(0, Number(v.ttLikeChance))) / 100;
+    if (v.liWaitMin != null) liMin = Math.max(1, Number(v.liWaitMin) || 30);
+    if (v.liWaitMax != null) liMax = Math.max(1, Number(v.liWaitMax) || 50);
+    if (v.liLikeChance != null) liChance = Math.min(100, Math.max(0, Number(v.liLikeChance))) / 100;
   }
 
   const DEFAULTS = {
@@ -89,6 +97,7 @@
     gapMinMin: 1, gapMaxMin: 3, likeChance: 60, lastLikeAt: 0,
     blockSensitive: true, blockWords: "",
     ttWatchMin: 8, ttWatchMax: 8, ttLikeChance: 100,
+    liWaitMin: 30, liWaitMax: 50, liLikeChance: 100,
     sites: { tiktok: true, linkedin: true, facebook: true, instagram: true, twitter: true },
     enabledTabs: []
   };
@@ -338,6 +347,44 @@
     log("liked");
   }
 
+  // ---- LinkedIn: পোস্ট মাঝখানে আনা → ৩০–৫০ সেকেন্ড অপেক্ষা → like → পরের পোস্ট ----
+  // t = এখনো সিদ্ধান্ত না হওয়া, screen-এর মাঝের কাছের পোস্টের like বাটন
+  function linkedinStep(t) {
+    if (!t) {
+      // screen-এ নতুন পোস্ট নেই: নিচে scroll করে আনা
+      lastMsg = "পরের পোস্ট খুঁজছে...";
+      if (state.autoScroll && elapsed >= 1500) { elapsed = 0; target = null; scrollNext(null); }
+      return;
+    }
+
+    // ১. পোস্টটা screen-এর মাঝখানে আনা (একবার)
+    if (state.autoScroll && !centered.has(t)) {
+      centered.add(t);
+      postOf(t).scrollIntoView({ behavior: document.hidden ? "auto" : "smooth", block: "center" });
+      scrolls++;
+      elapsed = 0;
+      cooldownUntil = Date.now() + 1000;
+      return;
+    }
+
+    // ২. অপেক্ষা
+    if (elapsed < watchFor) {
+      lastMsg = `পোস্টে অপেক্ষা ${Math.ceil((watchFor - elapsed) / 1000)}s`;
+      return;
+    }
+
+    // ৩. সিদ্ধান্ত: like বা বাদ, তারপর পরের পোস্ট
+    clicked.add(t);
+    target = null;
+    if (!state.autoLike) { log("পরের পোস্ট"); return; }
+    const post = postOf(t);
+    const bad = blockedWord(post);
+    if (bad) { skipped++; log(`skip: "${bad}"`); }
+    else if (isPromoted(post)) { log("ad - skip"); }
+    else if (Math.random() > liChance) { skipped++; log("skipped (random)"); }
+    else doLike(t, false);
+  }
+
   // ---- TikTok: স্ক্রিনে সবচেয়ে বেশি দেখা যাওয়া ভিডিওর item ----
   function tiktokItem() {
     let best = null, bestArea = 0;
@@ -456,11 +503,14 @@
     if (t !== target) {
       target = t;
       elapsed = 0;
-      watchFor = SITE === "tiktok"
-        ? rand(Math.min(ttMin, ttMax), Math.max(ttMin, ttMax)) * 1000
-        : rand(cfg.watch[0], cfg.watch[1]);
+      watchFor =
+        SITE === "tiktok" ? rand(Math.min(ttMin, ttMax), Math.max(ttMin, ttMax)) * 1000 :
+        SITE === "linkedin" ? rand(Math.min(liMin, liMax), Math.max(liMin, liMax)) * 1000 :
+        rand(cfg.watch[0], cfg.watch[1]);
     }
     elapsed += dt;
+
+    if (SITE === "linkedin") { linkedinStep(t); return; }
 
     if (SITE === "tiktok") { tiktokStep(t, buttons); return; }
 
