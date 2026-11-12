@@ -252,6 +252,8 @@
     const text = post.innerText || "";
     // ৩টা বা তার বেশি আরবি অক্ষর থাকলে বাদ (ভুলবশত একটা অক্ষরে নয়)
     if (blockOn && (text.match(ARABIC) || []).length >= 3) return "আরবি লেখা";
+    // ﷺ ﷲ ﷻ ইত্যাদি একক ধর্মীয় চিহ্ন
+    if (blockOn && /[ﷰ-﷽]/.test(text)) return "আরবি চিহ্ন";
     if (!blockRegex) return null;
     const m = text.match(blockRegex);
     return m ? m[0] : null;
