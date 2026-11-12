@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 - auto-like-combined
+- item selector-এর ওপর নির্ভরতা বাদ: like বাটন/video খুঁজে কাজ করে
+- আসল scrollable container খুঁজে scroll (TikTok-এ ArrowDown fallback)
+- popup থেকে tab-এ script inject (reload-এর পর refresh লাগবে না)
+- page-এ status box
+- বাংলা UI-তে like বাটন চেনা
+- TikTok-এ আগে like করা ভিডিও unlike না হওয়ার চেক
+
 ## 1.0.1 - auto-like-combined
 - Like বাটন load না হলে পরের tick-এ আবার চেষ্টা করে (আগে একবারেই হার মানত)
 - LinkedIn-এ nested item দুইবার match হওয়ার সমস্যা ঠিক

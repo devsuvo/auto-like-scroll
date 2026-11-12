@@ -1,179 +1,202 @@
-// Auto Like & Scroll - TikTok + LinkedIn combined content script (v1.0.1)
+// Auto Like & Scroll - TikTok + LinkedIn (v1.1.0)
+// item container-এর ওপর নির্ভর করে না: like বাটন / video খুঁজে নেয়,
+// আর scroll করে আসল scrollable container ধরে।
 (() => {
-  // ---- site ভিত্তিক selector ও সেটিং ----
-  const SITES = {
-    tiktok: {
-      match: "tiktok.com",
-      items: [
-        '[data-e2e="recommend-list-item-container"]',
-        '[data-e2e="browse-video"]'
-      ],
-      likeSelectors: [
-        '[data-e2e="like-icon"]',
-        '[data-e2e="browse-like"]',
-        '[data-e2e="browse-like-icon"]'
-      ],
-      keyNav: true // TikTok পরের ভিডিও ArrowDown দিয়ে নেয়
-    },
-    linkedin: {
-      match: "linkedin.com",
-      items: [
-        '[data-urn^="urn:li:activity"]',
-        ".feed-shared-update-v2"
-      ],
-      likeSelectors: [
-        'button.react-button__trigger[aria-pressed="false"]',
-        'button[aria-label*="Like" i][aria-pressed="false"]'
-      ],
-      keyNav: false
-    }
-  };
+  if (window.__autoLikeLoaded) return; // দুইবার inject হলে বাদ
+  window.__autoLikeLoaded = true;
 
   const host = location.hostname;
-  const site = Object.values(SITES).find((s) => host.includes(s.match));
-  if (!site) return;
+  const SITE = host.includes("tiktok.com") ? "tiktok"
+    : host.includes("linkedin.com") ? "linkedin" : null;
+  if (!SITE) return;
 
-  const WATCH_MIN = 4000;   // আইটেম কমপক্ষে কত ms দেখা হবে
-  const WATCH_MAX = 8000;   // সর্বোচ্চ কত ms
-  const LIKE_AFTER = 2000;  // আইটেম আসার কত ms পর like চেষ্টা
-  const LIKE_MAX_TRIES = 8; // like বাটন না পেলে কতবার চেষ্টা
-  const SCROLL_COOLDOWN = 1500;
-  const TICK = 1000;
+  // ---- সেটিং ----
+  const WATCH_MIN = 4000;
+  const WATCH_MAX = 8000;
+  const LIKE_AFTER = 1500;
+  const TICK = 500;
+  const LIKE_WORDS = /like|react|পছন্দ|লাইক/i;
+  const NOT_LIKE_WORDS = /comment|share|repost|send|মন্তব্য|শেয়ার/i;
 
   const state = { autoLike: false, autoScroll: false };
-  const likedItems = new WeakSet();
-  let currentItem = null;
+  const clicked = new WeakSet();
+  let target = null;          // বর্তমান like বাটন / video
   let elapsed = 0;
-  let watchTarget = 0;
-  let likeTries = 0;
+  let watchFor = 0;
   let cooldownUntil = 0;
+  let likes = 0;
+  let scrolls = 0;
+  let lastMsg = "ready";
 
   const rand = (a, b) => a + Math.random() * (b - a);
-  const log = (...a) => console.log("[AutoLike]", ...a);
+  const log = (m) => { lastMsg = m; console.log("[AutoLike]", m); };
 
-  // ---- settings load / live update ----
-  try {
-    chrome.storage.local.get({ autoLike: false, autoScroll: false }, (v) => {
-      state.autoLike = !!v.autoLike;
-      state.autoScroll = !!v.autoScroll;
-      log("settings", state);
-    });
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== "local") return;
-      if (changes.autoLike) state.autoLike = !!changes.autoLike.newValue;
-      if (changes.autoScroll) state.autoScroll = !!changes.autoScroll.newValue;
-    });
-  } catch (e) {
-    console.warn("[AutoLike] storage error", e);
+  // ---- status box (কী হচ্ছে দেখা যাবে) ----
+  const badge = document.createElement("div");
+  badge.style.cssText =
+    "position:fixed;left:10px;bottom:10px;z-index:2147483647;" +
+    "background:rgba(0,0,0,.8);color:#fff;font:12px/1.4 system-ui,sans-serif;" +
+    "padding:6px 10px;border-radius:8px;pointer-events:none;display:none;max-width:260px";
+  const mountBadge = () => document.body && !badge.isConnected && document.body.appendChild(badge);
+
+  function renderBadge(btnCount) {
+    mountBadge();
+    const on = state.autoLike || state.autoScroll;
+    badge.style.display = on ? "block" : "none";
+    if (!on) return;
+    badge.textContent =
+      `AutoLike [${SITE}] Like:${state.autoLike ? "ON" : "off"} Scroll:${state.autoScroll ? "ON" : "off"}` +
+      ` | buttons:${btnCount} likes:${likes} scrolls:${scrolls} | ${lastMsg}`;
   }
+
+  // ---- settings ----
+  chrome.storage.local.get({ autoLike: false, autoScroll: false }, (v) => {
+    state.autoLike = !!v.autoLike;
+    state.autoScroll = !!v.autoScroll;
+  });
+  chrome.storage.onChanged.addListener((c, area) => {
+    if (area !== "local") return;
+    if (c.autoLike) state.autoLike = !!c.autoLike.newValue;
+    if (c.autoScroll) state.autoScroll = !!c.autoScroll.newValue;
+    target = null;
+  });
 
   // ---- helpers ----
-  // nested match বাদ দিয়ে শুধু সবচেয়ে বাইরের item রাখে (একই পোস্ট দুইবার না আসে)
-  function getAllItems() {
-    const found = new Set();
-    for (const sel of site.items) {
-      document.querySelectorAll(sel).forEach((el) => found.add(el));
-      if (found.size) break; // প্রথম কাজ করা selector-টাই যথেষ্ট
-    }
-    return Array.from(found).filter(
-      (el) => !Array.from(found).some((other) => other !== el && other.contains(el))
-    );
+  function inViewport(el) {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight &&
+      r.right > 0 && r.left < innerWidth;
   }
 
-  // screen-এ সবচেয়ে বেশি দেখা যাচ্ছে এমন item
-  function getVisibleItem() {
-    const vh = window.innerHeight;
-    let best = null;
-    let bestVisible = 0;
-    for (const el of getAllItems()) {
-      const r = el.getBoundingClientRect();
-      const visible = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
-      if (visible > bestVisible) {
-        bestVisible = visible;
-        best = el;
+  function distToCenter(el) {
+    const r = el.getBoundingClientRect();
+    return Math.abs((r.top + r.bottom) / 2 - innerHeight / 2);
+  }
+
+  function labelOf(el) {
+    return ((el.getAttribute("aria-label") || "") + " " + (el.textContent || "")).trim();
+  }
+
+  // page-এর সব like বাটন
+  function findLikeButtons() {
+    const set = new Set();
+    if (SITE === "tiktok") {
+      document.querySelectorAll(
+        '[data-e2e="like-icon"],[data-e2e="browse-like-icon"],[data-e2e="browse-like"],[data-e2e="video-player-like"]'
+      ).forEach((el) => set.add(el.closest("button") || el));
+      if (!set.size) {
+        document.querySelectorAll("button[aria-label]").forEach((b) => {
+          const l = b.getAttribute("aria-label");
+          if (LIKE_WORDS.test(l) && !NOT_LIKE_WORDS.test(l)) set.add(b);
+        });
       }
-    }
-    return best;
-  }
-
-  function findLikeButton(item) {
-    for (const sel of site.likeSelectors) {
-      const el = item.querySelector(sel);
-      if (el) return el.closest("button") || el;
-    }
-    return null;
-  }
-
-  // true মানে like করা গেছে বা আগেই like করা আছে
-  function tryLike(item) {
-    const btn = findLikeButton(item);
-    if (!btn) return false; // বাটন এখনো load হয়নি, পরের tick-এ আবার চেষ্টা
-    if (btn.getAttribute("aria-pressed") === "true") return true;
-    btn.click();
-    log("liked");
-    return true;
-  }
-
-  function goNext(item) {
-    const items = getAllItems();
-    const next = items[items.indexOf(item) + 1];
-    cooldownUntil = Date.now() + SCROLL_COOLDOWN;
-
-    if (site.keyNav) {
-      const ev = new KeyboardEvent("keydown", {
-        key: "ArrowDown", code: "ArrowDown", keyCode: 40, which: 40,
-        bubbles: true, cancelable: true
-      });
-      (document.activeElement || document.body).dispatchEvent(ev);
-      document.dispatchEvent(ev);
-
-      // ArrowDown কাজ না করলে scroll করে fallback
-      setTimeout(() => {
-        if (getVisibleItem() === item) fallbackScroll(next);
-      }, 1200);
-      return;
-    }
-    fallbackScroll(next);
-  }
-
-  function fallbackScroll(next) {
-    if (next) {
-      next.scrollIntoView({ behavior: "smooth", block: "start" });
     } else {
-      window.scrollBy({ top: window.innerHeight, behavior: "smooth" });
+      document.querySelectorAll(
+        "button.react-button__trigger, button[aria-pressed]"
+      ).forEach((b) => {
+        const l = labelOf(b);
+        if (LIKE_WORDS.test(l) && !NOT_LIKE_WORDS.test(l)) set.add(b);
+      });
     }
+    return Array.from(set).filter(inViewport);
   }
 
-  // ---- main loop (প্রতি সেকেন্ডে) ----
+  // screen-এর মাঝখানের কাছের like বাটন (TikTok-এ চলমান ভিডিওর পাশেরটা)
+  function pickTarget(buttons) {
+    let pool = buttons;
+    if (SITE === "linkedin") {
+      // LinkedIn: যেগুলো এখনো like দেওয়া হয়নি
+      pool = buttons.filter((b) => b.getAttribute("aria-pressed") !== "true" && !clicked.has(b));
+    }
+    if (!pool.length && SITE === "tiktok") {
+      // like বাটন না পেলে অন্তত চলমান video ধরে scroll চালু থাকবে
+      pool = Array.from(document.querySelectorAll("video")).filter(inViewport);
+    }
+    pool.sort((a, b) => distToCenter(a) - distToCenter(b));
+    return pool[0] || null;
+  }
+
+  function isLiked(btn) {
+    if (btn.getAttribute("aria-pressed") === "true") return true;
+    // TikTok: like করা থাকলে আইকন লাল (fill) হয়
+    const path = btn.querySelector("svg path, svg");
+    if (path) {
+      const fill = (getComputedStyle(path).fill || "") + (getComputedStyle(path).color || "");
+      if (/254,\s*44,\s*85|255,\s*59,\s*92|#fe2c55/i.test(fill)) return true;
+    }
+    return false;
+  }
+
+  function doLike(btn) {
+    if (btn.tagName === "VIDEO") return;
+    clicked.add(btn);
+    if (isLiked(btn)) { log("already liked"); return; }
+    btn.click();
+    likes++;
+    log("liked");
+  }
+
+  // সত্যিকারের scroll হওয়া container খুঁজে বের করে
+  function scrollerFor(el) {
+    let n = el && el.parentElement;
+    while (n && n !== document.body) {
+      const s = getComputedStyle(n);
+      if (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 20) return n;
+      n = n.parentElement;
+    }
+    return document.scrollingElement || document.documentElement;
+  }
+
+  function scrollNext(anchor) {
+    cooldownUntil = Date.now() + 1500;
+    const box = scrollerFor(anchor || document.querySelector("video") || document.body);
+    const before = box.scrollTop;
+    const amount = SITE === "tiktok" ? box.clientHeight : Math.round(innerHeight * 0.75);
+    box.scrollBy({ top: amount, behavior: "smooth" });
+    scrolls++;
+    log("scrolled");
+
+    // scroll না হলে TikTok-এ ArrowDown / window scroll চেষ্টা
+    setTimeout(() => {
+      if (Math.abs(box.scrollTop - before) > 5) return;
+      if (SITE === "tiktok") {
+        const ev = { key: "ArrowDown", code: "ArrowDown", keyCode: 40, which: 40, bubbles: true };
+        document.body.dispatchEvent(new KeyboardEvent("keydown", ev));
+        document.dispatchEvent(new KeyboardEvent("keydown", ev));
+      }
+      window.scrollBy({ top: amount, behavior: "smooth" });
+      log("scroll fallback");
+    }, 1000);
+  }
+
+  // ---- main loop ----
   setInterval(() => {
-    if (!state.autoLike && !state.autoScroll) return;
-    if (Date.now() < cooldownUntil) return; // scroll চলাকালীন অপেক্ষা
+    const on = state.autoLike || state.autoScroll;
+    if (!on) { renderBadge(0); return; }
 
-    const item = getVisibleItem();
-    if (!item) return;
+    const buttons = findLikeButtons();
+    renderBadge(buttons.length);
+    if (Date.now() < cooldownUntil) return;
 
-    if (item !== currentItem) {
-      currentItem = item;
+    const t = pickTarget(buttons);
+    if (t !== target) {
+      target = t;
       elapsed = 0;
-      likeTries = 0;
-      watchTarget = rand(WATCH_MIN, WATCH_MAX);
+      watchFor = rand(WATCH_MIN, WATCH_MAX);
     }
     elapsed += TICK;
 
-    if (state.autoLike && !likedItems.has(item) && elapsed >= LIKE_AFTER) {
-      likeTries++;
-      if (tryLike(item)) {
-        likedItems.add(item);
-      } else if (likeTries >= LIKE_MAX_TRIES) {
-        likedItems.add(item); // বাটন পাওয়া যাচ্ছে না, আর চেষ্টা বন্ধ
-        log("like button not found - selector check করুন");
-      }
+    if (state.autoLike && t && !clicked.has(t) && elapsed >= LIKE_AFTER) {
+      doLike(t);
+    }
+    if (state.autoLike && !buttons.length && elapsed % 4000 < TICK) {
+      log("like button পাওয়া যায়নি");
     }
 
-    if (state.autoScroll && elapsed >= watchTarget) {
+    if (state.autoScroll && elapsed >= watchFor) {
+      target = null;
       elapsed = 0;
-      currentItem = null;
-      goNext(item);
+      scrollNext(t);
     }
   }, TICK);
 })();
