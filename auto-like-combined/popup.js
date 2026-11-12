@@ -10,13 +10,17 @@ chrome.storage.local.get({ autoLike: false, autoScroll: false, speed: "fast" }, 
   speedEl.value = v.speed;
 });
 
-const gapEl = document.getElementById("likeGapMin");
-chrome.storage.local.get({ likeGapMin: 2 }, (v) => { gapEl.value = v.likeGapMin; });
-gapEl.addEventListener("change", () => {
-  const n = Math.max(0, parseFloat(gapEl.value) || 0);
-  gapEl.value = n;
-  chrome.storage.local.set({ likeGapMin: n });
-});
+// সংখ্যার ঘরগুলো: id = storage key
+const NUM_FIELDS = { gapMinMin: [1, 0, 60], gapMaxMin: [3, 0, 60], likeChance: [60, 0, 100] };
+for (const [key, [def, lo, hi]] of Object.entries(NUM_FIELDS)) {
+  const el = document.getElementById(key);
+  chrome.storage.local.get({ [key]: def }, (v) => { el.value = v[key]; });
+  el.addEventListener("change", () => {
+    const n = Math.min(hi, Math.max(lo, parseFloat(el.value) || 0));
+    el.value = n;
+    chrome.storage.local.set({ [key]: n });
+  });
+}
 
 speedEl.addEventListener("change", () => {
   chrome.storage.local.set({ speed: speedEl.value });

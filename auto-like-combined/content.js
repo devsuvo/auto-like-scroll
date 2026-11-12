@@ -18,9 +18,11 @@
     slow:   { watch: [4000, 8000], likeAfter: 1500, cooldown: 1500 }
   };
   let cfg = SPEEDS.fast;
-  let likeGapMs = 2 * 60 * 1000; // দুই like-এর মাঝে সময় (popup থেকে বদলানো যায়)
-  let lastLikeAt = 0;            // সব tab মিলিয়ে শেষ like-এর সময়
-  let nextGap = likeGapMs;
+  let gapMin = 1, gapMax = 3; // দুই like-এর মাঝে ১–৩ মিনিট এলোমেলো
+  let likeChance = 0.6;       // ৬০% পোস্টে like, বাকিগুলো বাদ
+  let lastLikeAt = 0;         // সব tab মিলিয়ে শেষ like-এর সময়
+  let nextGap = 60000;
+  let skipped = 0;
   const TICK = 250;
   const LIKE_WORDS = /like|react|পছন্দ|লাইক/i;
   const NOT_LIKE_WORDS = /comment|share|repost|send|মন্তব্য|শেয়ার/i;
@@ -53,30 +55,37 @@
     if (!on) return;
     badge.textContent =
       `AutoLike [${SITE}] Like:${state.autoLike ? "ON" : "off"} Scroll:${state.autoScroll ? "ON" : "off"}` +
-      ` | buttons:${btnCount} likes:${likes} scrolls:${scrolls} | ${lastMsg}`;
+      ` | buttons:${btnCount} likes:${likes} skip:${skipped} scrolls:${scrolls} | ${lastMsg}`;
   }
 
   // ---- settings ----
-  const setGap = (min) => {
-    likeGapMs = Math.max(0, Number(min) || 0) * 60 * 1000;
-    nextGap = jitter(likeGapMs);
-  };
-  // ±10% এলোমেলো, যাতে ঠিক একই সময় পরপর না হয়
-  function jitter(ms) { return ms * (0.9 + Math.random() * 0.2); }
+  function randGap() {
+    const lo = Math.min(gapMin, gapMax), hi = Math.max(gapMin, gapMax);
+    return (lo + Math.random() * (hi - lo)) * 60000;
+  }
+  function applySettings(v) {
+    if (v.gapMinMin != null) gapMin = Math.max(0, Number(v.gapMinMin) || 0);
+    if (v.gapMaxMin != null) gapMax = Math.max(0, Number(v.gapMaxMin) || 0);
+    if (v.likeChance != null) likeChance = Math.min(100, Math.max(0, Number(v.likeChance))) / 100;
+  }
 
   chrome.storage.local.get(
-    { autoLike: false, autoScroll: false, speed: "fast", likeGapMin: 2, lastLikeAt: 0 },
+    { autoLike: false, autoScroll: false, speed: "fast",
+      gapMinMin: 1, gapMaxMin: 3, likeChance: 60, lastLikeAt: 0 },
     (v) => {
       state.autoLike = !!v.autoLike;
       state.autoScroll = !!v.autoScroll;
       cfg = SPEEDS[v.speed] || SPEEDS.fast;
-      setGap(v.likeGapMin);
+      applySettings(v);
+      nextGap = randGap();
       lastLikeAt = v.lastLikeAt || 0;
     }
   );
   chrome.storage.onChanged.addListener((c, area) => {
     if (area !== "local") return;
-    if (c.likeGapMin) setGap(c.likeGapMin.newValue);
+    const nv = {};
+    for (const k of ["gapMinMin", "gapMaxMin", "likeChance"]) if (c[k]) nv[k] = c[k].newValue;
+    if (Object.keys(nv).length) { applySettings(nv); nextGap = randGap(); }
     if (c.lastLikeAt) lastLikeAt = c.lastLikeAt.newValue || 0;
     if (c.speed) cfg = SPEEDS[c.speed.newValue] || SPEEDS.fast;
     if (c.autoLike) state.autoLike = !!c.autoLike.newValue;
@@ -175,9 +184,37 @@
     btn.click();
     likes++;
     lastLikeAt = Date.now();
-    nextGap = jitter(likeGapMs);
+    nextGap = randGap();
     chrome.storage.local.set({ lastLikeAt });
     log("liked");
+  }
+
+  // like বাটনের পুরো পোস্ট/ভিডিও অংশ
+  function postOf(btn) {
+    const p = btn.closest(
+      '[data-urn],[data-id^="urn:li"],.feed-shared-update-v2,article,[data-e2e="recommend-list-item-container"]'
+    );
+    if (p) return p;
+    let n = btn;
+    for (let i = 0; i < 8 && n.parentElement; i++) n = n.parentElement;
+    return n;
+  }
+
+  // বিজ্ঞাপন পোস্ট
+  function isPromoted(post) {
+    const head = (post.innerText || "").slice(0, 400);
+    return /\b(promoted|sponsored)\b|প্রচারিত|স্পনসর/i.test(head);
+  }
+
+  // পোস্ট যত বড়, তত বেশি সময় "পড়বে" (২–১৫ সেকেন্ড)
+  const readTimes = new WeakMap();
+  function readTime(post) {
+    if (!readTimes.has(post)) {
+      const len = (post.innerText || "").length;
+      const ms = Math.min(15000, 2000 + Math.min(len, 1500) * 12) * rand(0.8, 1.2);
+      readTimes.set(post, ms);
+    }
+    return readTimes.get(post);
   }
 
   // সত্যিকারের scroll হওয়া container খুঁজে বের করে
@@ -234,16 +271,32 @@
     if (state.autoLike && waitLeft > 0) {
       lastMsg = `next like ${Math.ceil(waitLeft / 1000)}s`;
     }
-    if (state.autoLike && waitLeft <= 0 && t && !clicked.has(t) && elapsed >= cfg.likeAfter) {
-      doLike(t);
-      // LinkedIn: screen-এ আরো পোস্ট থাকলে scroll-এর আগে সাথে সাথে পরেরটা like
-      if (SITE === "linkedin") target = null;
+    let reading = false;
+    if (state.autoLike && waitLeft <= 0 && t && t.tagName !== "VIDEO" && !clicked.has(t)) {
+      const post = postOf(t);
+      const need = Math.max(cfg.likeAfter, readTime(post));
+      if (isPromoted(post)) {
+        clicked.add(t);
+        log("ad - skip");
+        if (SITE === "linkedin") target = null;
+      } else if (elapsed < need) {
+        reading = true; // পড়া শেষ না হওয়া পর্যন্ত scroll থামবে
+        lastMsg = `reading ${Math.ceil((need - elapsed) / 1000)}s`;
+      } else if (Math.random() > likeChance) {
+        clicked.add(t);
+        skipped++;
+        log("skipped (random)");
+        if (SITE === "linkedin") target = null;
+      } else {
+        doLike(t);
+        if (SITE === "linkedin") target = null;
+      }
     }
     if (state.autoLike && !buttons.length && elapsed % 4000 < TICK) {
       log("like button পাওয়া যায়নি");
     }
 
-    if (state.autoScroll && elapsed >= watchFor) {
+    if (state.autoScroll && !reading && elapsed >= watchFor) {
       target = null;
       elapsed = 0;
       scrollNext(t);

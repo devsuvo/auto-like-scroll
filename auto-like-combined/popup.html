@@ -74,8 +74,17 @@
   </div>
 
   <div class="row">
-    <span>Like প্রতি (মিনিট)</span>
-    <input type="number" id="likeGapMin" min="0" step="0.5" style="width:56px">
+    <span>Like বিরতি (মিনিট)</span>
+    <span>
+      <input type="number" id="gapMinMin" min="0" step="0.5" style="width:40px">
+      –
+      <input type="number" id="gapMaxMin" min="0" step="0.5" style="width:40px">
+    </span>
+  </div>
+
+  <div class="row">
+    <span>কত % পোস্টে like</span>
+    <input type="number" id="likeChance" min="0" max="100" step="5" style="width:50px">
   </div>
 
   <p class="note" id="status">TikTok বা LinkedIn tab খোলা থাকলে সাথে সাথে কার্যকর হয়।</p>
