@@ -8,6 +8,9 @@ let timer = null;
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "autolike") return;
   ports.add(port);
+  // minimize/লুকানো থাকলেও Chrome যেন এই tab বন্ধ (discard) না করে
+  const tabId = port.sender && port.sender.tab && port.sender.tab.id;
+  if (tabId != null) chrome.tabs.update(tabId, { autoDiscardable: false }, () => void chrome.runtime.lastError);
   port.onMessage.addListener(() => { /* pong: worker-কে জাগিয়ে রাখে */ });
   port.onDisconnect.addListener(() => {
     ports.delete(port);

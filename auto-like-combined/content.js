@@ -718,6 +718,15 @@
     if (stuckScrolls >= 3 && clickLoadMore()) { stuckScrolls = 0; cooldownUntil = Date.now() + 3000; return; }
     stuckScrolls++;
     scrollNext(lastAnchor);
+    // minimize অবস্থায় browser নিজে scroll event কম পাঠায়, তাই নতুন পোস্ট load হয় না।
+    // নিজে scroll event পাঠালে feed নতুন পোস্ট আনে।
+    if (document.hidden) {
+      setTimeout(() => {
+        const box = scrollerFor(lastAnchor && lastAnchor.isConnected ? lastAnchor : document.body);
+        box.dispatchEvent(new Event("scroll", { bubbles: true }));
+        window.dispatchEvent(new Event("scroll"));
+      }, 800);
+    }
   }
 
   function scrollNext(anchor) {
@@ -978,6 +987,12 @@
   }
 
   setInterval(tick, 250);
+
+  // Chrome লুকানো tab কিছুক্ষণ পর "freeze" করে দেয় (সব script থেমে যায়)।
+  // একটা Web Lock ধরে রাখলে Chrome সেই tab freeze করে না।
+  try {
+    if (navigator.locks) navigator.locks.request("autolike-keepalive-" + Math.random(), () => new Promise(() => {}));
+  } catch (e) { /* ignore */ }
   // background থেকে নিজের tab id জেনে নেয়, তারপর সেটিং লোড
   chrome.runtime.sendMessage({ type: "whoami" }, (res) => {
     void chrome.runtime.lastError;
