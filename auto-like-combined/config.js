@@ -22,7 +22,7 @@
   // প্ল্যাটফর্মগুলো আসল সীমা প্রকাশ করে না।
   const RULE_DEFAULTS = {
     ttWatchMin: 8,  ttWatchMax: 8,  ttLikeChance: 100, ttHourly: 0,  ttDaily: 0,
-    liWaitMin: 30,  liWaitMax: 50,  liLikeChance: 100, liHourly: 0,  liDaily: 0,
+    liWaitMin: 10,  liWaitMax: 20,  liLikeChance: 100, liHourly: 0,  liDaily: 200,
     fbWaitMin: 20,  fbWaitMax: 45,  fbLikeChance: 50,  fbHourly: 30, fbDaily: 150,
     igWaitMin: 25,  igWaitMax: 60,  igLikeChance: 40,  igHourly: 20, igDaily: 100,
     xWaitMin: 15,   xWaitMax: 40,   xLikeChance: 50,   xHourly: 30,  xDaily: 150
@@ -30,7 +30,7 @@
 
   const TIPS = {
     tiktok: "TikTok: সব ভিডিওতে like দিলে ঝুঁকি বেশি। ঘণ্টার সীমা (যেমন ১০০) দিলে নিরাপদ।",
-    linkedin: "LinkedIn: ৩০–৫০ সেকেন্ড অপেক্ষা ভালো। দিনে ১৫০-এর বেশি না রাখাই ভালো।",
+    linkedin: "LinkedIn: প্রতি পোস্টে ১০–২০ সেকেন্ড অপেক্ষা, দিনে ২০০ like। ৫০০-৬০০ দিলে restriction-এর ঝুঁকি বেশি।",
     facebook: "Facebook দ্রুত like দেখলে \"misusing this feature\" বলে সাময়িক block করে। ঘণ্টায় ৩০, দিনে ১৫০-এর মধ্যে রাখুন।",
     instagram: "Instagram সবচেয়ে কড়া, \"Action Blocked\" সহজে আসে। ঘণ্টায় ২০, দিনে ১০০-এর বেশি না। নতুন account হলে আরো কম।",
     twitter: "X automation ধরলে account lock করে। ঘণ্টায় ৩০, দিনে ১৫০-এর মধ্যে রাখুন।"
@@ -38,9 +38,10 @@
 
   const DEFAULTS = Object.assign({
     autoLike: false, autoScroll: false, speed: "slow",
+    autoComment: false, geminiKey: "", lastCommentAt: 0, // LinkedIn AI comment
     humanize: true,        // মাঝে মাঝে থামা, একটু উপরে ফিরে দেখা, এলোমেলো অবস্থান
     stopOnWarning: true,   // "Try again later"/captcha দেখলে ২৪ ঘণ্টা বন্ধ
-    breakAfter: 15, breakMin: 5, reloadEvery: 10,
+    breakAfter: 15, breakMin: 2, reloadEvery: 10,
     blockSensitive: true, blockWords: "",
     sites: { tiktok: true, linkedin: true, facebook: true, instagram: true, twitter: true },
     enabledTabs: [],
@@ -49,7 +50,7 @@
   }, RULE_DEFAULTS);
 
   // এগুলো বদলালে কাজ থামানো হয় না (শুধু হিসাব আপডেট)
-  const COUNTER_KEYS = ["batchLikes", "breakUntil", "likeLog", "siteBlockedUntil", "lastWarning", "lastLikeAt"];
+  const COUNTER_KEYS = ["batchLikes", "breakUntil", "likeLog", "siteBlockedUntil", "lastWarning", "lastLikeAt", "lastCommentAt"];
 
   function siteFromHost(host) {
     const h = String(host || "").toLowerCase();

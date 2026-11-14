@@ -17,7 +17,7 @@ function renderHero(v) {
   const now = Date.now();
   const tabOn = currentTab && v.enabledTabs.includes(currentTab.id);
   const siteOn = currentSite && v.sites[currentSite] !== false;
-  const doing = v.autoLike || v.autoScroll;
+  const doing = v.autoLike || v.autoScroll || (v.autoComment && currentSite === "linkedin");
   const blockedUntil = currentSite ? (v.siteBlockedUntil || {})[currentSite] || 0 : 0;
   const blocked = blockedUntil > now;
 
@@ -61,7 +61,7 @@ function renderRule(v) {
 }
 
 function render(v) {
-  for (const id of ["autoLike", "autoScroll", "blockSensitive", "humanize", "stopOnWarning"]) {
+  for (const id of ["autoLike", "autoScroll", "autoComment", "blockSensitive", "humanize", "stopOnWarning"]) {
     $(id).checked = !!v[id];
   }
   $("speed").value = v.speed;
@@ -69,6 +69,7 @@ function render(v) {
   $("breakMin").value = v.breakMin;
   $("reloadEvery").value = v.reloadEvery;
   $("blockWords").value = v.blockWords;
+  $("geminiKey").value = v.geminiKey || "";
   document.querySelectorAll("[data-site]").forEach((el) => {
     el.checked = v.sites[el.dataset.site] !== false;
   });
@@ -103,11 +104,12 @@ $("tabOn").addEventListener("change", () => {
   });
 });
 
-for (const id of ["autoLike", "autoScroll", "blockSensitive", "humanize", "stopOnWarning"]) {
+for (const id of ["autoLike", "autoScroll", "autoComment", "blockSensitive", "humanize", "stopOnWarning"]) {
   $(id).addEventListener("change", () => chrome.storage.local.set({ [id]: $(id).checked }, reload));
 }
 
 $("speed").addEventListener("change", () => chrome.storage.local.set({ speed: $("speed").value }));
+$("geminiKey").addEventListener("change", () => chrome.storage.local.set({ geminiKey: $("geminiKey").value.trim() }));
 $("blockWords").addEventListener("change", () => chrome.storage.local.set({ blockWords: $("blockWords").value }));
 
 function clampInput(el, lo, hi, whole) {

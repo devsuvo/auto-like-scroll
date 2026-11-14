@@ -21,6 +21,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "whoami") {
     sendResponse({ tabId: sender.tab ? sender.tab.id : null });
   }
+  if (msg && msg.type === "gemini") {
+    geminiComment(msg.text).then(
+      (comment) => sendResponse({ comment }),
+      (e) => sendResponse({ error: String(e.message || e) })
+    );
+    return true; // async
+  }
 });
 
 // tab বন্ধ হলে চালু-tab তালিকা থেকে বাদ
@@ -64,3 +71,44 @@ chrome.runtime.onInstalled.addListener(() => {
     });
   });
 });
+
+// LinkedIn পোস্টের জন্য Gemini দিয়ে ছোট comment লেখা
+async function geminiComment(postText) {
+  const { geminiKey } = await chrome.storage.local.get({ geminiKey: "" });
+  if (!geminiKey) throw new Error("Gemini API key দেওয়া নেই");
+  const prompt =
+    "You are a professional on LinkedIn. Write ONE short, natural, relevant comment (1-2 sentences, " +
+    "max 30 words) on the post below. Be specific to the post content, sound human, no hashtags, " +
+    "at most one emoji, no quotes around it. Reply in the same language as the post. " +
+    "If the post is sad (death, layoff, illness) write a kind, supportive comment.\n\nPOST:\n" +
+    String(postText).slice(0, 3000);
+  let data = null, lastErr = "";
+  // একটা model ব্যস্ত/না থাকলে পরেরটা
+  for (const model of ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]) {
+    const gen = { temperature: 0.9, maxOutputTokens: 300 };
+    if (model.startsWith("gemini-2.5")) gen.thinkingConfig = { thinkingBudget: 0 };
+    let res;
+    try {
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: gen })
+        }
+      );
+    } catch (e) {
+      lastErr = "network: " + e.message;
+      continue;
+    }
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { data = d; break; }
+    lastErr = (d.error && d.error.message) || "HTTP " + res.status;
+    if (res.status === 400 || res.status === 401 || res.status === 403) break; // key ভুল: আর চেষ্টা নয়
+  }
+  if (!data) throw new Error(lastErr || "Gemini উত্তর দেয়নি");
+  const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
+  const text = parts.map((p) => p.text || "").join("").trim().replace(/^["']|["']$/g, "");
+  if (!text) throw new Error("Gemini খালি উত্তর দিয়েছে");
+  return text;
+}

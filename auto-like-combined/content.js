@@ -1,4 +1,4 @@
-// Auto Like & Scroll - content script (v3.0.0)
+// Auto Like & Scroll - content script (v3.1.0)
 // TikTok, LinkedIn, Facebook, Instagram, X/Twitter
 // - প্রতিটা site-এর আলাদা নিয়ম: অপেক্ষা, like %, ঘণ্টা/দিনের সীমা (config.js)
 // - ধর্মীয়/রাজনৈতিক/আরবি filter (filter.js)
@@ -31,13 +31,13 @@
 
   // ---- সেটিং (storage থেকে) ----
   const state = {
-    autoLike: false, autoScroll: false, siteOn: true, tabOn: false,
+    autoLike: false, autoScroll: false, autoComment: false, siteOn: true, tabOn: false,
     humanize: true, stopOnWarning: true
   };
   let speed = SPEEDS.slow;
   let rule = { min: 30, max: 50, chance: 1, hourly: 0, daily: 0 };
   let matcher = null;
-  let breakAfter = 15, breakMin = 5, reloadEvery = 10;
+  let breakAfter = 15, breakMin = 2, reloadEvery = 10;
 
   // ---- হিসাব (সব tab মিলিয়ে, storage-এ থাকে) ----
   let batchLikes = 0, breakUntil = 0;
@@ -52,6 +52,8 @@
   let cooldownUntil = 0, idleUntil = 0;
   let ttDecided = null, ttScrollAt = 0;
   let likes = 0, skipped = 0, scrolls = 0;
+  let comments = 0, lastCommentAt = 0, commentBusy = false;
+  const COMMENT_EVERY = 45 * 1000; // ৪৫ সেকেন্ডে সর্বোচ্চ ১টা comment
   let lastMsg = "ready";
   let lastTickAt = 0, lastWarnCheck = 0;
   let viewH = innerHeight, viewW = innerWidth; // minimize হলে শেষ জানা মাপ
@@ -60,7 +62,7 @@
   const rand = (a, b) => a + Math.random() * (b - a);
   const num = (v, d) => (v != null && Number.isFinite(Number(v)) ? Number(v) : d);
   const log = (m) => { lastMsg = m; console.log("[AutoLike]", m); };
-  const isOn = () => (state.autoLike || state.autoScroll) && state.siteOn && state.tabOn;
+  const isOn = () => (state.autoLike || state.autoScroll || state.autoComment) && state.siteOn && state.tabOn;
 
   function fmt(ms) {
     const s = Math.max(0, Math.ceil(ms / 1000));
@@ -73,22 +75,52 @@
   // =====================================================================
   const badge = document.createElement("div");
   badge.style.cssText =
-    "position:fixed;left:10px;bottom:10px;z-index:2147483647;" +
-    "background:rgba(0,0,0,.8);color:#fff;font:12px/1.4 system-ui,sans-serif;" +
-    "padding:6px 10px;border-radius:8px;pointer-events:none;display:none;max-width:300px";
+    "position:fixed;left:12px;bottom:12px;z-index:2147483647;pointer-events:none;display:none;" +
+    "width:240px;box-sizing:border-box;padding:10px 12px;border-radius:12px;" +
+    "background:rgba(20,22,28,.92);color:#e8eaed;font:12px/1.4 system-ui,'Segoe UI',sans-serif;" +
+    "box-shadow:0 6px 20px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.08)";
+
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const chip = (name, on) =>
+    `<span style="padding:1px 7px;border-radius:999px;font-size:11px;` +
+    `background:${on ? "rgba(52,199,89,.18)" : "rgba(255,255,255,.07)"};color:${on ? "#5fdc7f" : "#8a8f98"}">` +
+    `${on ? "●" : "○"} ${name}</span>`;
+  const stat = (label, val) =>
+    `<div style="text-align:center"><div style="font-size:15px;font-weight:600;color:#fff">${val}</div>` +
+    `<div style="font-size:10px;color:#8a8f98">${label}</div></div>`;
+  function bar(label, n, max) {
+    const pct = max ? Math.min(100, (n / max) * 100) : 0;
+    const col = pct >= 90 ? "#ff6b6b" : pct >= 70 ? "#ffb347" : "#4c9aff";
+    return `<div style="margin-top:6px"><div style="display:flex;justify-content:space-between;font-size:11px;color:#b0b4bb">` +
+      `<span>${label}</span><span>${n} / ${max || "∞"}</span></div>` +
+      (max ? `<div style="height:4px;border-radius:2px;background:rgba(255,255,255,.1);margin-top:3px">` +
+        `<div style="height:100%;width:${pct}%;border-radius:2px;background:${col}"></div></div>` : "") +
+      `</div>`;
+  }
 
   function renderBadge(btnCount) {
     if (document.hidden) return;
     if (document.body && !badge.isConnected) document.body.appendChild(badge);
     badge.style.display = isOn() ? "block" : "none";
     if (!isOn()) return;
-    const limits = rule.hourly || rule.daily
-      ? ` | ঘণ্টায় ${recentLikes(HOUR).length}/${rule.hourly || "∞"} দিনে ${recentLikes(DAY).length}/${rule.daily || "∞"}`
-      : "";
-    badge.textContent =
-      `AutoLike [${SITE}] Like:${state.autoLike ? "ON" : "off"} Scroll:${state.autoScroll ? "ON" : "off"}` +
-      ` | buttons:${btnCount} likes:${likes} skip:${skipped} scrolls:${scrolls}${limits} | ${lastMsg}`;
+    const name = (CFG.SITE_NAMES && CFG.SITE_NAMES[SITE]) || SITE;
+    badge.innerHTML =
+      `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">` +
+        `<b style="font-size:13px;color:#fff">AutoLike · ${esc(name)}</b>` +
+        `<span style="font-size:10px;color:#8a8f98">btn ${btnCount}</span></div>` +
+      `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">` +
+        chip("Like", state.autoLike) + chip("Scroll", state.autoScroll) +
+        (SITE === "linkedin" ? chip(`Comment ${comments}`, state.autoComment) : "") + `</div>` +
+      `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:6px 0;` +
+        `border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08)">` +
+        stat("Likes", likes) + stat("Skip", skipped) + stat("Scroll", scrolls) + `</div>` +
+      (rule.hourly || rule.daily
+        ? bar("ঘণ্টায়", recentLikes(HOUR).length, rule.hourly) + bar("দিনে", recentLikes(DAY).length, rule.daily)
+        : "") +
+      `<div style="margin-top:8px;padding:5px 8px;border-radius:6px;background:rgba(76,154,255,.12);` +
+        `color:#9cc4ff;font-size:11.5px">${esc(lastMsg || "...")}</div>`;
   }
+
 
   // =====================================================================
   // settings
@@ -97,6 +129,8 @@
     chrome.storage.local.get(CFG.DEFAULTS, (v) => {
       state.autoLike = !!v.autoLike;
       state.autoScroll = !!v.autoScroll;
+      state.autoComment = SITE === "linkedin" && !!v.autoComment;
+      lastCommentAt = num(v.lastCommentAt, 0);
       state.siteOn = (v.sites || {})[SITE] !== false;
       state.tabOn = myTabId != null && (v.enabledTabs || []).includes(myTabId);
       state.humanize = v.humanize !== false;
@@ -114,7 +148,7 @@
       if (rule.min > rule.max) [rule.min, rule.max] = [rule.max, rule.min];
 
       breakAfter = Math.max(0, num(v.breakAfter, 15));
-      breakMin = Math.max(0, num(v.breakMin, 5));
+      breakMin = Math.max(0, num(v.breakMin, 2));
       reloadEvery = Math.max(0, num(v.reloadEvery, 10));
       batchLikes = num(v.batchLikes, 0);
       breakUntil = num(v.breakUntil, 0);
@@ -133,6 +167,7 @@
       if (c.breakUntil) breakUntil = num(c.breakUntil.newValue, 0);
       if (c.likeLog) likeLog = c.likeLog.newValue || {};
       if (c.siteBlockedUntil) siteBlockedUntil = c.siteBlockedUntil.newValue || {};
+      if (c.lastCommentAt) lastCommentAt = num(c.lastCommentAt.newValue, 0);
       return;
     }
     loadAll();
@@ -424,11 +459,189 @@
 
   // filter → বিজ্ঞাপন → % → like
   function decide(btn, post) {
+    if (SITE === "linkedin") { doLike(btn); return; } // LinkedIn: কোনো পোস্ট skip নয়
     const bad = filterReason(post);
     if (bad) { skipped++; log(`skip: ${bad}`); return; }
     if (isPromoted(post)) { skipped++; log("ad - skip"); return; }
     if (Math.random() > rule.chance) { skipped++; log("skipped (random)"); return; }
     doLike(btn);
+  }
+
+  // =====================================================================
+  // LinkedIn auto comment (Gemini AI)
+  // =====================================================================
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const visible = (el) => !!el && el.getClientRects().length > 0;
+  const commentedPosts = new WeakSet();
+
+  async function waitFor(fn, ms) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      const v = fn();
+      if (v) return v;
+      await sleep(250);
+    }
+    return null;
+  }
+
+  // like বাটন থেকে উপরে উঠে এমন container খোঁজা যেখানে Comment বাটনও আছে
+  // (পুরো feed নয়, শুধু ঐ পোস্টের action bar / পোস্ট)
+  function isCommentBtn(b) {
+    const aria = (b.getAttribute("aria-label") || "").trim();
+    const text = (b.innerText || "").trim();
+    if (text.length > 30) return false;
+    if (/repost|share|send|reply|শেয়ার/i.test(aria + " " + text)) return false;
+    return /^(comment|মন্তব্য)/i.test(text) || /^comment\b|comment on/i.test(aria) ||
+      !!b.querySelector('svg[data-test-icon^="comment"], use[href*="comment"]');
+  }
+
+  function postRootFor(likeBtn) {
+    const p = likeBtn.closest('[data-urn],[data-id^="urn:li"],.feed-shared-update-v2');
+    if (p) return p;
+    let n = likeBtn;
+    for (let i = 0; i < 12 && n.parentElement; i++) {
+      n = n.parentElement;
+      if (n.querySelectorAll("[data-urn],.feed-shared-update-v2").length > 1) break; // feed পর্যন্ত চলে গেছে
+      if (n.innerText && n.innerText.length > 200 &&
+          Array.from(n.querySelectorAll('button,[role="button"]')).some(isCommentBtn)) return n;
+    }
+    return postOf(likeBtn);
+  }
+
+  function findCommentButton(likeBtn, post) {
+    // like বাটনের সবচেয়ে কাছের comment বাটন (একই action bar)
+    let n = likeBtn;
+    for (let i = 0; i < 6 && n.parentElement; i++) {
+      n = n.parentElement;
+      const b = Array.from(n.querySelectorAll('button,[role="button"]')).find((x) => x !== likeBtn && isCommentBtn(x));
+      if (b) return b;
+    }
+    return Array.from(post.querySelectorAll('button,[role="button"]')).find(isCommentBtn) || null;
+  }
+
+  const EDITOR_SEL = '.ql-editor[contenteditable="true"],div[role="textbox"][contenteditable="true"],' +
+                     '.comments-comment-box div[contenteditable="true"],div[contenteditable="true"][aria-label*="comment" i]';
+
+  function findEditor(post) {
+    const a = document.activeElement;
+    if (a && a.isContentEditable && (post.contains(a) || /comment/i.test(a.getAttribute("aria-label") || "") ||
+        a.closest(".comments-comment-box,.comments-comment-texteditor"))) return a;
+    const inside = Array.from(post.querySelectorAll(EDITOR_SEL)).filter(visible);
+    return inside[0] || null;
+  }
+
+  function findSubmit(editor) {
+    let n = editor;
+    for (let i = 0; i < 8 && n.parentElement; i++) {
+      n = n.parentElement;
+      const b = Array.from(n.querySelectorAll("button")).find((x) =>
+        visible(x) && !x.disabled && x.getAttribute("aria-disabled") !== "true" &&
+        (/submit-button/.test(x.className) || /^(comment|post|মন্তব্য|পোস্ট)$/i.test((x.innerText || "").trim())));
+      if (b) return b;
+    }
+    return null;
+  }
+
+  function editorText(editor) {
+    return (editor.innerText || "").replace(/\s+/g, " ").trim();
+  }
+
+  async function typeInto(editor, text) {
+    editor.click();
+    editor.focus();
+    // cursor editor-এর ভেতরে রাখা, না হলে insertText কাজ করে না
+    const sel = getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    await sleep(rand(300, 700));
+    document.execCommand("insertText", false, text);
+    await sleep(300);
+    if (editorText(editor).length < 5) {
+      // fallback: সরাসরি লিখে input event
+      editor.innerHTML = "<p></p>";
+      editor.firstChild.textContent = text;
+      editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+    }
+    return editorText(editor).length >= 5;
+  }
+
+  function postText(post) {
+    const cap = Array.from(post.querySelectorAll(CAPTION_SELECTORS.linkedin))
+      .map((e) => e.innerText || "").join("\n").trim();
+    return cap || (post.innerText || "").slice(0, 2000);
+  }
+
+  function askGemini(text) {
+    return new Promise((r) => {
+      try {
+        chrome.runtime.sendMessage({ type: "gemini", text }, (x) => {
+          const err = chrome.runtime.lastError;
+          r(err ? { error: err.message } : (x || { error: "background উত্তর দেয়নি" }));
+        });
+      } catch (e) {
+        r({ error: "extension reload হয়েছে, page refresh করুন" });
+      }
+    });
+  }
+
+  async function doComment(likeBtn) {
+    commentBusy = true;
+    const post = postRootFor(likeBtn);
+    commentedPosts.add(post);
+    let ok = false;
+    try {
+      const text = postText(post);
+      if (text.length < 15) { log("comment: পোস্টে লেখা নেই, বাদ"); return; }
+
+      log("comment লিখছে (AI)...");
+      const res = await askGemini(text);
+      if (res.error) { log("Gemini error: " + res.error); return; }
+
+      let editor = findEditor(post);
+      if (!editor) {
+        const btn = findCommentButton(likeBtn, post);
+        if (!btn) { log("comment বাটন পাওয়া যায়নি"); return; }
+        btn.click();
+        editor = await waitFor(() => findEditor(post), 8000);
+      }
+      if (!editor) { log("comment বক্স খোলেনি"); return; }
+
+      if (!(await typeInto(editor, res.comment))) { log("comment বক্সে লেখা যায়নি"); return; }
+      await sleep(rand(1500, 3000)); // লেখার পর একটু থামা
+
+      const submit = await waitFor(() => findSubmit(editor), 5000);
+      if (!submit) { log("Post বাটন পাওয়া যায়নি"); return; }
+      submit.click();
+      await sleep(1500);
+      ok = true;
+      comments++;
+      log("✅ commented: " + res.comment.slice(0, 40));
+    } catch (e) {
+      log("comment error: " + e.message);
+    } finally {
+      // সফল হলে ৪৫ সেকেন্ড পর পরেরটা; ব্যর্থ হলে ১৫ সেকেন্ড পর আবার চেষ্টা
+      lastCommentAt = ok ? Date.now() : Date.now() - COMMENT_EVERY + 15 * SECOND;
+      chrome.storage.local.set({ lastCommentAt });
+      cooldownUntil = Date.now() + 2000;
+      // comment হয়ে গেলে ঐ পোস্টে আর বসে না থেকে like দিয়ে পরের পোস্টে
+      if (ok && target === likeBtn) elapsed = watchFor;
+      commentBusy = false;
+    }
+  }
+
+  // সময় হলে screen-এর মাঝের পোস্টে comment। true = comment শুরু হয়েছে
+  function maybeComment(likeBtn, now) {
+    if (!state.autoComment || SITE !== "linkedin" || commentBusy || !likeBtn) return false;
+    if (now - lastCommentAt < COMMENT_EVERY) return false;
+    const post = postRootFor(likeBtn);
+    if (commentedPosts.has(post)) return false;
+    const bad = filterReason(post) || (isPromoted(post) ? "ad" : null);
+    if (bad) { commentedPosts.add(post); log("comment বাদ: " + bad); return false; }
+    doComment(likeBtn);
+    return true;
   }
 
   // =====================================================================
@@ -516,6 +729,9 @@
       return;
     }
 
+    // comment-এর সময় হলে পোস্টের পুরো অপেক্ষা শেষ হওয়ার আগেই (৩ সেকেন্ড দেখে) comment
+    if (elapsed >= 3000 && maybeComment(t, now)) return;
+
     // ২. অপেক্ষা
     if (elapsed < watchFor) {
       lastMsg = `পোস্টে অপেক্ষা ${Math.ceil((watchFor - elapsed) / 1000)}s`;
@@ -527,6 +743,7 @@
     target = null;
     if (state.autoLike) decide(t, postOf(t));
     else log("পরের পোস্ট");
+    maybeComment(t, now);
 
     // ৪. মানুষের মতো: মাঝে মাঝে থামা বা একটু উপরে ফিরে দেখা
     if (state.humanize) {
@@ -644,7 +861,7 @@
       return;
     }
 
-    if (now < cooldownUntil) return;
+    if (now < cooldownUntil || commentBusy) return;
 
     const t = SITE === "tiktok" ? tiktokItem() : pickTarget(buttons);
     if (t !== target) {
