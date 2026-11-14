@@ -50,6 +50,9 @@
   const centered = new WeakSet(); // যে পোস্ট মাঝখানে আনা হয়েছে
   let target = null, elapsed = 0, watchFor = 0;
   let cooldownUntil = 0, idleUntil = 0;
+  let lastAnchor = null;           // শেষ যে পোস্টে কাজ হয়েছে (scroll container চেনার জন্য)
+  let searchingSince = 0, stuckScrolls = 0; // পরের পোস্ট না পেলে কতক্ষণ/কতবার
+  const DONE = "data-autolike-done";   // পোস্টে দাগ: LinkedIn বাটন বদলে দিলেও পোস্ট চেনা যায়
   let ttDecided = null, ttScrollAt = 0;
   let likes = 0, skipped = 0, scrolls = 0;
   let comments = 0, lastCommentAt = 0, commentBusy = false;
@@ -432,7 +435,7 @@
 
   // feed: এখনো সিদ্ধান্ত না হওয়া, screen-এর মাঝের কাছের পোস্টের like বাটন
   function pickTarget(buttons) {
-    const pool = buttons.filter((b) => !S.liked(b) && !clicked.has(b));
+    const pool = buttons.filter((b) => !S.liked(b) && !clicked.has(b) && !isDone(b));
     pool.sort((a, b) => distToCenter(a) - distToCenter(b));
     return pool[0] || null;
   }
@@ -443,6 +446,16 @@
     let n = btn;
     for (let i = 0; i < 8 && n.parentElement; i++) n = n.parentElement;
     return n;
+  }
+
+  function isDone(btn) {
+    if (!FEED) return false;
+    const p = btn.closest(S.post);
+    return !!(p && p.hasAttribute(DONE));
+  }
+  function markDone(btn) {
+    const p = FEED && btn.closest(S.post);
+    if (p) p.setAttribute(DONE, "1");
   }
 
   function doLike(btn) {
@@ -657,12 +670,59 @@
       if (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 20) return n;
       n = n.parentElement;
     }
-    return pageScroller();
+    const pg = pageScroller();
+    if (pg.scrollHeight > pg.clientHeight + 20) return pg;
+    // page নিজে scroll হয় না (LinkedIn-এর নতুন UI): সবচেয়ে বড় scroll হওয়া box
+    let best = pg, bestH = 0;
+    document.querySelectorAll("main, div, section").forEach((d) => {
+      if (d.clientHeight < vh() * 0.5 || d.scrollHeight <= d.clientHeight + 20) return;
+      if (!/(auto|scroll)/.test(getComputedStyle(d).overflowY)) return;
+      if (d.clientHeight > bestH) { bestH = d.clientHeight; best = d; }
+    });
+    return best;
+  }
+
+  // screen-এর নিচে থাকা পরের (কাজ না হওয়া) পোস্ট
+  function nextPostBelow() {
+    const posts = Array.from(document.querySelectorAll(S.post)).filter((p) => {
+      if (p.hasAttribute(DONE) || p.parentElement.closest(S.post)) return false; // ভেতরের (share করা) পোস্ট বাদ
+      const r = p.getBoundingClientRect();
+      return r.height > 80 && r.top > vh() * 0.35;
+    });
+    posts.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+    return posts[0] || null;
+  }
+
+  // feed-এর শেষে "Show more" / "See new posts" বাটন থাকলে চাপা
+  function clickLoadMore() {
+    const re = /^(show more( feed updates| results| posts)?|see (new|more) posts|load more|আরো দেখুন|new posts)$/i;
+    const b = Array.from(document.querySelectorAll('button, [role="button"]')).find((x) => {
+      const t = ((x.innerText || "").trim().split(/\r?\n/)[0] || x.getAttribute("aria-label") || "").trim();
+      return re.test(t) && x.getClientRects().length > 0;
+    });
+    if (b) { b.click(); log("আরো পোস্ট load করা হলো"); return true; }
+    return false;
+  }
+
+  // feed-এ পরের পোস্টে যাওয়া। আটকে গেলে ধাপে ধাপে বাড়তি চেষ্টা।
+  function feedNext() {
+    cooldownUntil = Date.now() + speed.cooldown;
+    const next = nextPostBelow();
+    if (next && stuckScrolls < 2) {
+      next.scrollIntoView({ behavior: behavior(), block: "start" });
+      scrolls++;
+      stuckScrolls++;
+      log("পরের পোস্টে যাচ্ছে");
+      return;
+    }
+    if (stuckScrolls >= 3 && clickLoadMore()) { stuckScrolls = 0; cooldownUntil = Date.now() + 3000; return; }
+    stuckScrolls++;
+    scrollNext(lastAnchor);
   }
 
   function scrollNext(anchor) {
     cooldownUntil = Date.now() + speed.cooldown;
-    const box = scrollerFor(anchor || document.querySelector("video") || document.body);
+    const box = scrollerFor(anchor && anchor.isConnected ? anchor : (document.querySelector("video") || document.body));
     const before = box.scrollTop;
     const amount = SITE === "tiktok" ? (box.clientHeight || vh()) : Math.round(vh() * rand(0.6, 0.85));
     box.scrollBy({ top: amount, behavior: behavior() });
@@ -677,6 +737,11 @@
         document.dispatchEvent(new KeyboardEvent("keydown", ev));
       }
       window.scrollBy({ top: amount, behavior: behavior() });
+      // শেষ চেষ্টা: keyboard দিয়ে নিচে (সব site-এ কাজ করে)
+      if (Math.abs(box.scrollTop - before) <= 5 && SITE !== "tiktok") {
+        const ev = { key: "PageDown", code: "PageDown", keyCode: 34, which: 34, bubbles: true };
+        (document.activeElement || document.body).dispatchEvent(new KeyboardEvent("keydown", ev));
+      }
       log("scroll fallback");
     }, 700);
   }
@@ -710,10 +775,17 @@
     if (now < idleUntil) { lastMsg = `একটু বিরতি ${fmt(idleUntil - now)}`; return; }
 
     if (!t) {
-      lastMsg = "পরের পোস্ট খুঁজছে...";
-      if (state.autoScroll && elapsed >= speed.search) { elapsed = 0; target = null; scrollNext(null); }
+      if (!searchingSince) searchingSince = now;
+      const waited = now - searchingSince;
+      lastMsg = `পরের পোস্ট খুঁজছে... ${Math.round(waited / 1000)}s`;
+      if (!state.autoScroll) return;
+      // ২ মিনিট কিছুই না পেলে page reload (feed আটকে গেছে)
+      if (waited > 2 * MINUTE) { log("feed আটকে গেছে - page reload"); location.reload(); return; }
+      if (elapsed >= speed.search) { elapsed = 0; target = null; feedNext(); }
       return;
     }
+    searchingSince = 0;
+    stuckScrolls = 0;
 
     // সীমা পূর্ণ হলে like-ও না, scroll-ও না (শুধু scroll করে যাওয়াও bot-এর মতো দেখায়)
     if (state.autoLike) {
@@ -740,6 +812,8 @@
 
     // ৩. সিদ্ধান্ত
     clicked.add(t);
+    markDone(t);
+    lastAnchor = t;
     target = null;
     if (state.autoLike) decide(t, postOf(t));
     else log("পরের পোস্ট");
